@@ -344,24 +344,31 @@ def read_root():
                 }
             }
 
-            // [작은 카드 배경] 8명 실시간 공유
+            // [작은 카드 배경] 경량화 렌더링으로 서버 끊김 방지
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
 
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const imgUrl = e.target.result;
-                    document.getElementById(`card-media-${index}`).innerHTML = `<img src="${imgUrl}" alt="BG">`;
+                const img = new Image();
+                const blobUrl = URL.createObjectURL(file);
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = 300;
+                    canvas.height = 300;
+                    ctx.drawImage(img, 0, 0, 300, 300);
+                    const compressedUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+                    document.getElementById(`card-media-${index}`).innerHTML = `<img src="${compressedUrl}" alt="BG">`;
 
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "card_bg_change", index: index, imgUrl: imgUrl }));
+                        ws.send(JSON.stringify({ type: "card_bg_change", index: index, imgUrl: compressedUrl }));
                     }
                 };
-                reader.readAsDataURL(file);
+                img.src = blobUrl;
             }
 
-            // [나만의 전체 배경] 내 컴퓨터 GIF/이미지 1초 로딩 (서버 과부하 0%)
+            // [나만의 전체 배경] 내 컴퓨터 GIF/이미지 1초 로딩
             function setLocalBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
