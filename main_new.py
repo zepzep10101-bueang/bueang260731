@@ -57,12 +57,11 @@ def read_root():
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                transition: transform 0.1s ease;
             }
 
             #bgMediaWrapper img {
-                width: 100%;
-                height: 100%;
+                width: 100vw;
+                height: 100vh;
                 object-fit: cover;
             }
 
@@ -225,17 +224,6 @@ def read_root():
                 gap: 8px;
                 margin-top: 8px;
             }
-            .slider-container {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 11px;
-                color: #ccc;
-                margin-top: 4px;
-            }
-            .slider-container input[type="range"] {
-                flex-grow: 1;
-            }
             .status-indicator {
                 font-size: 11px;
                 padding: 2px 6px;
@@ -263,22 +251,17 @@ def read_root():
                     <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">0명</span></p>
                 </div>
 
+                <!-- 방장 전용 전체 배경 설정 (크기 조절 제어 제거, 전체화면 고정) -->
                 <div class="panel-box">
-                    <h3>🖼️ 배경 변경 (이미지 / GIF / 유튜브)</h3>
+                    <h3>🖼️ 전체 배경 변경 (👑 방장 전용)</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드:</div>
+                        <div style="font-size: 11px; color: #aaa;">GIF / 이미지 업로드:</div>
                         <input type="file" id="bgFileInput" accept="image/*" style="font-size:11px;" onchange="uploadMasterBackground(event)">
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
                             <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
-                        </div>
-                        
-                        <div class="slider-container">
-                            <span>크기:</span>
-                            <input type="range" id="bgScaleSlider" min="50" max="250" value="100" oninput="resizeBackground(this.value)">
-                            <span id="scaleValue">100%</span>
                         </div>
                     </div>
                 </div>
@@ -296,7 +279,6 @@ def read_root():
         </div>
 
         <script>
-            let currentScale = 100;
             let ws = null;
             const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
             const localStreams = {};
@@ -336,7 +318,6 @@ def read_root():
                 const box = document.getElementById(`stream-box-${index}`);
 
                 if (localStreams[index]) {
-                    // 공유 중단
                     localStreams[index].getTracks().forEach(track => track.stop());
                     delete localStreams[index];
                     box.innerHTML = `
@@ -344,7 +325,6 @@ def read_root():
                         <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
                     `;
                 } else {
-                    // 공유 시작
                     try {
                         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
                         localStreams[index] = stream;
@@ -353,7 +333,6 @@ def read_root():
                         const videoEl = document.getElementById(`video-${index}`);
                         videoEl.srcObject = stream;
 
-                        // 사용자가 웹 브라우저의 '공유 중지'를 눌렀을 때 처리
                         stream.getVideoTracks()[0].onended = () => {
                             delete localStreams[index];
                             box.innerHTML = `
@@ -362,7 +341,7 @@ def read_root():
                             `;
                         };
                     } catch (err) {
-                        console.error("화면 공유 취소 또는 에러:", err);
+                        console.error("화면 공유 에러:", err);
                     }
                 }
             }
@@ -397,19 +376,10 @@ def read_root():
                             } else if (data.type === "count") {
                                 document.getElementById('userCount').innerText = data.count + "명";
                             } else if (data.type === "bg_change") {
-                                currentScale = data.scale || 100;
                                 document.getElementById('bgMediaWrapper').innerHTML = data.mediaHtml;
-                                document.getElementById('bgScaleSlider').value = currentScale;
-                                document.getElementById('scaleValue').innerText = currentScale + "%";
-                                applyScale();
-                            } else if (data.type === "bg_resize") {
-                                currentScale = data.scale;
-                                document.getElementById('bgScaleSlider').value = currentScale;
-                                document.getElementById('scaleValue').innerText = currentScale + "%";
-                                applyScale();
                             }
                         } catch(e) {
-                            console.error("데이터 오류:", e);
+                            console.error("데이터 처리 에러:", e);
                         }
                     };
 
@@ -424,11 +394,6 @@ def read_root():
                 }
             }
 
-            function applyScale() {
-                const wrapper = document.getElementById('bgMediaWrapper');
-                if (wrapper) wrapper.style.transform = `scale(${currentScale / 100})`;
-            }
-
             function sendChat() {
                 const input = document.getElementById('chatInput');
                 if (!input.value.trim()) return;
@@ -438,22 +403,23 @@ def read_root():
                 }
             }
 
+            // 방장 전용 GIF / 이미지 전체배경 업로드 (화면 전체 100% 꽉 채움)
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
 
                 const objectUrl = URL.createObjectURL(file);
-                const mediaHtml = `<img src="${objectUrl}" alt="Background">`;
+                const mediaHtml = `<img src="${objectUrl}" alt="Full Background">`;
                 
+                // 내 화면 즉시 꽉 채워 변경
                 document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
-                applyScale();
 
+                // 다른 접속자들에게 보낼 데이터
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const scale = document.getElementById('bgScaleSlider').value;
-                    const networkHtml = `<img src="${e.target.result}" alt="Background">`;
+                    const networkHtml = `<img src="${e.target.result}" alt="Full Background">`;
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: networkHtml, scale: scale }));
+                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: networkHtml }));
                     }
                 };
                 reader.readAsDataURL(file);
@@ -477,23 +443,12 @@ def read_root():
                     return;
                 }
 
-                const scale = document.getElementById('bgScaleSlider').value;
                 const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
                 
                 document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
-                applyScale();
 
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
-                }
-            }
-
-            function resizeBackground(scale) {
-                currentScale = scale;
-                document.getElementById('scaleValue').innerText = scale + "%";
-                applyScale();
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
+                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
                 }
             }
 
@@ -522,7 +477,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
                     else:
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
-            elif p_type in ["bg_change", "bg_resize"]:
+            elif p_type == "bg_change":
                 await manager.broadcast(json.dumps(packet))
 
     except WebSocketDisconnect:
