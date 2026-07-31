@@ -37,7 +37,7 @@ def read_root():
         <title>행운방 대시보드</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
-            body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: transparent; }
+            body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: #111; }
 
             .video-background {
                 position: fixed;
@@ -74,7 +74,7 @@ def read_root():
             .overlay {
                 position: fixed;
                 top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0, 0, 0, 0.3);
+                background: rgba(0, 0, 0, 0.35);
                 z-index: 1;
                 pointer-events: none;
             }
@@ -253,7 +253,7 @@ def read_root():
                 <div class="panel-box">
                     <h3>🖼️ 나만의 전체 배경 설정</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">내 컴퓨터 GIF/이미지 파일 선택:</div>
+                        <div style="font-size: 11px; color: #aaa;">GIF/이미지 파일 선택:</div>
                         <input type="file" id="bgFileInput" accept="image/*" style="font-size:11px;" onchange="setLocalBackground(event)">
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
@@ -344,7 +344,7 @@ def read_root():
                 }
             }
 
-            // [실시간 8명 공유] 작은 카드 개별 배경 업로드
+            // [작은 카드 배경] 8명 실시간 공유
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -361,16 +361,16 @@ def read_root():
                 reader.readAsDataURL(file);
             }
 
-            // [개인 브라우저 전용] 나만의 전체 배경 설정 (내 컴퓨터 파일)
+            // [나만의 전체 배경] 내 컴퓨터 GIF/이미지 1초 로딩 (서버 과부하 0%)
             function setLocalBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
 
-                const objectUrl = URL.createObjectURL(file);
-                document.getElementById('bgMediaWrapper').innerHTML = `<img src="${objectUrl}" alt="Full Background">`;
+                const blobUrl = URL.createObjectURL(file);
+                document.getElementById('bgMediaWrapper').innerHTML = `<img src="${blobUrl}" alt="Full Background">`;
             }
 
-            // [개인 브라우저 전용] 나만의 유튜브 전체 배경 설정
+            // [나만의 전체 배경] 유튜브 링크
             function extractYoutubeId(url) {
                 if (!url) return null;
                 url = url.trim();
@@ -414,7 +414,6 @@ def read_root():
                             } else if (data.type === "count") {
                                 document.getElementById('userCount').innerText = data.count + "명";
                             } else if (data.type === "card_bg_change") {
-                                // 카드 배경 실시간 전원 동기화
                                 const targetBg = document.getElementById(`card-media-${data.index}`);
                                 if (targetBg) {
                                     targetBg.innerHTML = `<img src="${data.imgUrl}" alt="BG">`;
