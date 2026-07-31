@@ -29,7 +29,7 @@ manager = ConnectionManager()
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    html_content = """
+    return """
     <!DOCTYPE html>
     <html lang="ko">
     <head>
@@ -55,7 +55,6 @@ def read_root():
                 height: 100%;
                 object-fit: cover;
                 transform: scale(1);
-                transition: transform 0.1s ease;
             }
 
             .overlay {
@@ -129,15 +128,6 @@ def read_root():
                 z-index: 2;
             }
 
-            .card-stream-box video {
-                width: 100%;
-                height: 100%;
-                object-fit: contain;
-                position: relative;
-                z-index: 2;
-                background: black;
-            }
-
             .card-memo {
                 background: rgba(0, 0, 0, 0.5);
                 border: 1px solid rgba(255, 255, 255, 0.3);
@@ -152,20 +142,6 @@ def read_root():
                 z-index: 2;
                 width: 100%;
             }
-
-            .btn-action {
-                background: #0984e3;
-                color: white;
-                border: none;
-                padding: 3px 6px;
-                font-size: 10px;
-                border-radius: 4px;
-                cursor: pointer;
-                transition: 0.2s;
-                z-index: 2;
-                position: relative;
-            }
-            .btn-action:hover { background: #74b9ff; }
 
             .side-panel {
                 display: flex;
@@ -239,17 +215,17 @@ def read_root():
             <div class="side-panel">
                 <div class="panel-box">
                     <h3>👑 대시보드</h3>
-                    <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">1명</span> / 최대 10명</p>
+                    <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">1명</span></p>
                 </div>
 
-                <div class="panel-box" id="masterPanel">
+                <div class="panel-box">
                     <h3>🖼️ 배경 변경 (이미지 / GIF)</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">배경 이미지/GIF 업로드:</div>
+                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드:</div>
                         <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
                         
                         <div class="slider-container">
-                            <span>배경 크기 조절:</span>
+                            <span>크기:</span>
                             <input type="range" id="bgScaleSlider" min="50" max="250" value="100" oninput="resizeBackground(this.value)">
                             <span id="scaleValue">100%</span>
                         </div>
@@ -259,10 +235,10 @@ def read_root():
                 <div class="panel-box chat-box">
                     <h3>💬 실시간 채팅</h3>
                     <div id="chatHistory" style="height: 180px; overflow-y: auto; margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.4;">
-                        [안내] 행운방 대시보드에 입장했습니다.
+                        [안내] 대시보드에 연결되었습니다.
                     </div>
                     <div class="chat-input">
-                        <input type="text" id="chatInput" placeholder="메시지를 입력하세요..." onkeypress="if(event.key==='Enter') sendChat()">
+                        <input type="text" id="chatInput" placeholder="메시지 입력..." onkeypress="if(event.key==='Enter') sendChat()">
                         <button onclick="sendChat()">전송</button>
                     </div>
                 </div>
@@ -271,52 +247,29 @@ def read_root():
 
         <script>
             let currentScale = 100;
-            let localStream = null;
-            let activeSharingIndex = null;
-            const peerConnections = {};
+            let ws;
 
-            const rtcConfig = {
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-            };
-
-            const cardData = [
-                { id: 1, user: '누나1', memo: '' },
-                { id: 2, user: '누나2', memo: '' },
-                { id: 3, user: '누나3', memo: '' },
-                { id: 4, user: '누나4', memo: '' },
-                { id: 5, user: '누나5', memo: '' },
-                { id: 6, user: '누나6', memo: '' },
-                { id: 7, user: '누나7', memo: '' },
-                { id: 8, user: '누나8', memo: '' }
-            ];
+            const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
 
             function initCards() {
                 const grid = document.getElementById('cardGrid');
                 grid.innerHTML = '';
                 cardData.forEach((card, index) => {
-                    const cardHtml = `
-                        <div class="timer-card" id="card-${index}">
-                            <div class="card-media-bg" id="card-media-${index}">
-                                <img id="img-${index}" src="" style="display:none;" alt="BG">
-                            </div>
-
+                    grid.innerHTML += `
+                        <div class="timer-card">
+                            <div class="card-media-bg"><img id="img-${index}" src="" style="display:none;" alt="BG"></div>
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; position:relative; z-index:2;">
-                                <input type="text" value="${card.user}" placeholder="아이디" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;" oninput="cardData[${index}].user = this.value">
+                                <input type="text" value="${card.user}" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;">
                                 <input type="file" accept="image/*,image/gif" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
-                                <button class="btn-action" id="btn-share-${index}" onclick="toggleScreenShare(${index})">🖥️ 화면공유</button>
                             </div>
-                            
                             <div class="card-stream-box">
-                                <video id="video-${index}" autoplay playsinline muted></video>
-                                <span id="placeholder-${index}" style="position:absolute; font-size:11px; color:#aaa; z-index:1;">화면 미공유 중</span>
+                                <span style="font-size:11px; color:#aaa;">화면 미공유 중</span>
                             </div>
-
                             <div style="position:relative; z-index:2;">
-                                <textarea class="card-memo" placeholder="메모 입력란..." oninput="cardData[${index}].memo = this.value">${card.memo}</textarea>
+                                <textarea class="card-memo" placeholder="메모 입력란..."></textarea>
                             </div>
                         </div>
                     `;
-                    grid.innerHTML += cardHtml;
                 });
             }
 
@@ -332,15 +285,12 @@ def read_root():
                 reader.readAsDataURL(file);
             }
 
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            let ws;
-
             function connectWebSocket() {
-                ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+                ws = new WebSocket(wsProtocol + window.location.host + "/ws");
 
-                ws.onmessage = async function(event) {
+                ws.onmessage = function(event) {
                     const data = JSON.parse(event.data);
-
                     if (data.type === "chat") {
                         const history = document.getElementById('chatHistory');
                         history.innerHTML += `<br>${data.msg}`;
@@ -354,144 +304,24 @@ def read_root():
                         bgImg.style.display = "block";
                         document.getElementById('bgScaleSlider').value = currentScale;
                         document.getElementById('scaleValue').innerText = currentScale + "%";
-                        applyScaleToBackground();
+                        applyScale();
                     } else if (data.type === "bg_resize") {
                         currentScale = data.scale;
                         document.getElementById('bgScaleSlider').value = currentScale;
                         document.getElementById('scaleValue').innerText = currentScale + "%";
-                        applyScaleToBackground();
-                    }
-                    else if (data.type === "stream_start") {
-                        const idx = data.cardIndex;
-                        document.getElementById(`placeholder-${idx}`).style.display = 'none';
-                        createPeerConnection(idx, false);
-                    } else if (data.type === "stream_stop") {
-                        const idx = data.cardIndex;
-                        const videoEl = document.getElementById(`video-${idx}`);
-                        videoEl.srcObject = null;
-                        document.getElementById(`placeholder-${idx}`).style.display = 'block';
-                        if (peerConnections[idx]) {
-                            peerConnections[idx].close();
-                            delete peerConnections[idx];
-                        }
-                    } else if (data.type === "offer") {
-                        const idx = data.cardIndex;
-                        let pc = peerConnections[idx];
-                        if (!pc) pc = createPeerConnection(idx, false);
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        ws.send(JSON.stringify({ type: "answer", cardIndex: idx, answer: answer }));
-                    } else if (data.type === "answer") {
-                        const idx = data.cardIndex;
-                        const pc = peerConnections[idx];
-                        if (pc) {
-                            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                        }
-                    } else if (data.type === "candidate") {
-                        const idx = data.cardIndex;
-                        const pc = peerConnections[idx];
-                        if (pc && data.candidate) {
-                            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                        }
+                        applyScale();
                     }
                 };
 
                 ws.onclose = function() {
-                    setTimeout(connectWebSocket, 3000); // 자동 재연결
+                    setTimeout(connectWebSocket, 2000);
                 };
             }
 
-            connectWebSocket();
-
-            function applyScaleToBackground() {
+            function applyScale() {
                 const bgImg = document.getElementById('bgImgElement');
-                if (bgImg) {
-                    bgImg.style.transform = `scale(${currentScale / 100})`;
-                }
+                if (bgImg) bgImg.style.transform = `scale(${currentScale / 100})`;
             }
-
-            function createPeerConnection(index, isSender) {
-                const pc = new RTCPeerConnection(rtcConfig);
-                peerConnections[index] = pc;
-
-                pc.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({ type: "candidate", cardIndex: index, candidate: event.candidate }));
-                    }
-                };
-
-                if (!isSender) {
-                    pc.ontrack = (event) => {
-                        const videoEl = document.getElementById(`video-${index}`);
-                        videoEl.srcObject = event.streams[0];
-                        document.getElementById(`placeholder-${index}`).style.display = 'none';
-                    };
-                }
-                return pc;
-            }
-
-            async function toggleScreenShare(index) {
-                const videoEl = document.getElementById(`video-${index}`);
-                const placeholderEl = document.getElementById(`placeholder-${index}`);
-                const btnEl = document.getElementById(`btn-share-${index}`);
-
-                try {
-                    if (activeSharingIndex !== null && activeSharingIndex !== index && localStream) {
-                        alert("이미 다른 카드에서 화면을 공유 중입니다.");
-                        return;
-                    }
-
-                    if (!localStream) {
-                        localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-                        videoEl.srcObject = localStream;
-                        placeholderEl.style.display = 'none';
-                        btnEl.innerText = "🛑 공유중단";
-                        activeSharingIndex = index;
-
-                        const pc = createPeerConnection(index, true);
-                        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-
-                        ws.send(JSON.stringify({ type: "stream_start", cardIndex: index }));
-                        ws.send(JSON.stringify({ type: "offer", cardIndex: index, offer: offer }));
-
-                        localStream.getVideoTracks()[0].onended = () => {
-                            stopScreenShare(index);
-                        };
-                    } else {
-                        stopScreenShare(index);
-                    }
-                } catch (err) {
-                    console.log("화면 공유 취소 또는 오류:", err);
-                }
-            }
-
-            function stopScreenShare(index) {
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                    localStream = null;
-                }
-                activeSharingIndex = null;
-                const videoEl = document.getElementById(`video-${index}`);
-                const placeholderEl = document.getElementById(`placeholder-${index}`);
-                const btnEl = document.getElementById(`btn-share-${index}`);
-
-                if (videoEl) videoEl.srcObject = null;
-                if (placeholderEl) placeholderEl.style.display = 'block';
-                if (btnEl) btnEl.innerText = "🖥️ 화면공유";
-
-                if (peerConnections[index]) {
-                    peerConnections[index].close();
-                    delete peerConnections[index];
-                }
-
-                ws.send(JSON.stringify({ type: "stream_stop", cardIndex: index }));
-            }
-
-            initCards();
 
             function sendChat() {
                 const input = document.getElementById('chatInput');
@@ -514,23 +344,19 @@ def read_root():
             function resizeBackground(scale) {
                 currentScale = scale;
                 document.getElementById('scaleValue').innerText = scale + "%";
-                applyScaleToBackground();
+                applyScale();
                 ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
             }
+
+            initCards();
+            connectWebSocket();
         </script>
     </body>
     </html>
     """
-    return html_content
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    if len(manager.active_connections) >= 10:
-        await websocket.accept()
-        await websocket.send_text(json.dumps({"type": "chat", "msg": "[안내] 인원이 가득 찼습니다. (최대 10명)"}))
-        await websocket.close()
-        return
-
     await manager.connect(websocket)
     await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
     
@@ -542,21 +368,18 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if p_type == "chat":
                 msg_text = packet.get('msg')
-                for connection in manager.active_connections:
-                    if connection == websocket:
-                        await connection.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
+                for conn in manager.active_connections:
+                    if conn == websocket:
+                        await conn.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
                     else:
-                        await connection.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
+                        await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
             elif p_type in ["bg_change", "bg_resize"]:
                 await manager.broadcast(json.dumps(packet))
                 await websocket.send_text(json.dumps(packet))
-            elif p_type in ["offer", "answer", "candidate", "stream_start", "stream_stop"]:
-                await manager.broadcast(json.dumps(packet), sender=websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
-        await manager.broadcast(json.dumps({"type": "chat", "msg": "[안내] 누군가 나갔습니다."}))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
