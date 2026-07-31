@@ -253,8 +253,11 @@ def read_root():
                 <div class="panel-box">
                     <h3>🖼️ 전체 배경 변경 (👑 방장 전용)</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">GIF / 이미지 업로드:</div>
-                        <input type="file" id="bgFileInput" accept="image/*" style="font-size:11px;" onchange="uploadMasterBackground(event)">
+                        <div style="font-size: 11px; color: #aaa;">GIF/이미지 URL 링크 붙여넣기:</div>
+                        <div style="display:flex; gap:4px;">
+                            <input type="text" id="bgUrlInput" placeholder="https://...gif" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
+                            <button onclick="setImageUrlBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
+                        </div>
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
@@ -344,7 +347,6 @@ def read_root():
                 }
             }
 
-            // 개별 작은 카드 배경 실시간 전원 공유 기능
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -352,10 +354,8 @@ def read_root():
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const imgUrl = e.target.result;
-                    // 내 화면 즉시 적용
                     document.getElementById(`card-media-${index}`).innerHTML = `<img src="${imgUrl}" alt="BG">`;
 
-                    // 다른 사람들에게 실시간 공유 전송
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: "card_bg_change", index: index, imgUrl: imgUrl }));
                     }
@@ -387,7 +387,6 @@ def read_root():
                             } else if (data.type === "bg_change") {
                                 document.getElementById('bgMediaWrapper').innerHTML = data.mediaHtml;
                             } else if (data.type === "card_bg_change") {
-                                // 카드 개별 배경 동기화 수신
                                 const targetBg = document.getElementById(`card-media-${data.index}`);
                                 if (targetBg) {
                                     targetBg.innerHTML = `<img src="${data.imgUrl}" alt="BG">`;
@@ -418,25 +417,17 @@ def read_root():
                 }
             }
 
-            // 방장 전용 GIF/이미지 전체 배경 (배포 서버 튕김 방지 처리)
-            function uploadMasterBackground(event) {
-                const file = event.target.files[0];
-                if (!file) return;
+            // GIF/이미지 URL 주소 등록 (배포 서버 튕김 제로)
+            function setImageUrlBackground() {
+                const url = document.getElementById('bgUrlInput').value.trim();
+                if (!url) return;
 
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const dataUrl = e.target.result;
-                    const mediaHtml = `<img src="${dataUrl}" alt="Full Background">`;
-                    
-                    // 내 화면 즉시 렌더링
-                    document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
+                const mediaHtml = `<img src="${url}" alt="Full Background">`;
+                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
 
-                    // 웹소켓으로 타 접속자 전송
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
-                    }
-                };
-                reader.readAsDataURL(file);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
+                }
             }
 
             function extractYoutubeId(url) {
