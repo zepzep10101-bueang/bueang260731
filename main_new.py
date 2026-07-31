@@ -39,7 +39,6 @@ def read_root():
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
             body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: transparent; }
 
-            /* 전체 배경 레이어 위치 및 z-index 완전 교정 */
             .video-background {
                 position: fixed;
                 top: 0; left: 0; 
@@ -116,7 +115,7 @@ def read_root():
                 position: absolute;
                 top: 0; left: 0; width: 100%; height: 100%;
                 z-index: 1;
-                opacity: 0.4;
+                opacity: 0.45;
                 pointer-events: none;
                 overflow: hidden;
             }
@@ -345,12 +344,23 @@ def read_root():
                 }
             }
 
+            // 개별 작은 카드 배경 실시간 전원 공유 기능
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
-                const url = URL.createObjectURL(file);
-                const mediaBg = document.getElementById(`card-media-${index}`);
-                mediaBg.innerHTML = `<img src="${url}" alt="BG">`;
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imgUrl = e.target.result;
+                    // 내 화면 즉시 적용
+                    document.getElementById(`card-media-${index}`).innerHTML = `<img src="${imgUrl}" alt="BG">`;
+
+                    // 다른 사람들에게 실시간 공유 전송
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "card_bg_change", index: index, imgUrl: imgUrl }));
+                    }
+                };
+                reader.readAsDataURL(file);
             }
 
             function connectWebSocket() {
@@ -376,6 +386,12 @@ def read_root():
                                 document.getElementById('userCount').innerText = data.count + "명";
                             } else if (data.type === "bg_change") {
                                 document.getElementById('bgMediaWrapper').innerHTML = data.mediaHtml;
+                            } else if (data.type === "card_bg_change") {
+                                // 카드 개별 배경 동기화 수신
+                                const targetBg = document.getElementById(`card-media-${data.index}`);
+                                if (targetBg) {
+                                    targetBg.innerHTML = `<img src="${data.imgUrl}" alt="BG">`;
+                                }
                             }
                         } catch(e) {
                             console.error("데이터 처리 에러:", e);
@@ -402,23 +418,22 @@ def read_root():
                 }
             }
 
-            // GIF 및 이미지 배경 로딩 방식 보완 (즉시 렌더링)
+            // 방장 전용 GIF/이미지 전체 배경 (배포 서버 튕김 방지 처리)
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
 
-                const objectUrl = URL.createObjectURL(file);
-                const mediaHtml = `<img src="${objectUrl}" alt="Full Background">`;
-                
-                // 1. 내 브라우저 화면에 GIF 배경 즉시 레이어로 출력
-                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
-
-                // 2. 파일 데이터를 Base64로 전송하여 타 접속자에게도 공유
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const networkHtml = `<img src="${e.target.result}" alt="Full Background">`;
+                    const dataUrl = e.target.result;
+                    const mediaHtml = `<img src="${dataUrl}" alt="Full Background">`;
+                    
+                    // 내 화면 즉시 렌더링
+                    document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
+
+                    // 웹소켓으로 타 접속자 전송
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: networkHtml }));
+                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
                     }
                 };
                 reader.readAsDataURL(file);
@@ -476,7 +491,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
                     else:
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
-            elif p_type == "bg_change":
+            elif p_type in ["bg_change", "card_bg_change"]:
                 await manager.broadcast(json.dumps(packet))
 
     except WebSocketDisconnect:
