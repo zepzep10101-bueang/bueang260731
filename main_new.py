@@ -227,7 +227,7 @@ def read_root():
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
-                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 또는 ID" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
+                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 또는 비디오 ID" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
                         </div>
                         
@@ -406,4 +406,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main_new:app", host="0.0.0.0", port=port)
+    uvicorn.run("main_new:app", host="0.0.0.0", port=port, reload=True)
