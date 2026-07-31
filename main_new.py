@@ -1,163 +1,627 @@
-import os
-import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from typing import List
+import json
 import uvicorn
+import os
 
 app = FastAPI()
 
 class ConnectionManager:
     def __init__(self):
-        # WebSocket 객체와 닉네임을 딕셔너리로 관리
-        self.active_connections: dict[WebSocket, str] = {}
+        self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket, nickname: str):
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections[websocket] = nickname
+        self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
-            del self.active_connections[websocket]
+            self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: str, sender: WebSocket = None):
         for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                pass
+            if sender and connection == sender:
+                continue
+            await connection.send_text(message)
 
 manager = ConnectionManager()
 
-# 누나의 기존 대시보드 UI (배경 유튜브, GIF, 화면 공유 + 닉네임 연동 반영)
-HTML_CONTENT = """
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>실시간 대시보드</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            font-family: Arial, sans-serif;
-            color: white;
-            background-color: #111;
-        }
-        /* 배경 유튜브 및 GIF 영역 스타일 예시 */
-        #bg-container {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            z-index: -1;
-            overflow: hidden;
-            opacity: 0.6;
-        }
-        .dashboard-box {
-            background: rgba(0, 0, 0, 0.7);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        #chatLog {
-            border: 1px solid #555;
-            height: 150px;
-            overflow-y: scroll;
-            margin-bottom: 10px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.5);
-        }
-    </style>
-</head>
-<body>
-    <!-- 배경 유튜브 / GIF 영역 -->
-    <div id="bg-container">
-        <!-- 예시 GIF 또는 유튜브 배경 요소 -->
-        <img src="https://media.giphy.com/media/3oK7LdBx2uGkPKnZm0/giphy.gif" style="width:100%; height:100%; object-fit:cover;" alt="background gif">
-    </div>
+@app.get("/", response_class=HTMLResponse)
+def read_root():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <title>행운방 대시보드</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
+            body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: #111; }
 
-    <h2>실시간 대시보드 (WebSocket & WebRTC)</h2>
-    
-    <div class="dashboard-box">
-        <label>닉네임: <input type="text" id="nicknameInput" value="누나1"></label>
-        <button onclick="connectWebSocket()">접속하기</button>
-    </div>
+            .video-background {
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh;
+                z-index: -2;
+                overflow: hidden;
+                pointer-events: none;
+            }
+            .video-background iframe, .video-background img, .video-background div {
+                position: absolute;
+                top: 50%; left: 50%;
+                transform: translate(-50%, -50%);
+                width: 100vw;
+                height: 56.25vw;
+                min-height: 100vh;
+                min-width: 177.77vh;
+                pointer-events: none;
+                border: none;
+            }
 
-    <div class="dashboard-box">
-        <h3>채팅창</h3>
-        <div id="chatLog"></div>
-        <input type="text" id="messageInput" placeholder="메시지를 입력하세요..." style="width: 70%; padding: 5px;" onkeypress="if(event.key==='Enter') sendMessage()">
-        <button onclick="sendMessage()" style="padding: 5px 15px;">전송</button>
-    </div>
+            .overlay {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0, 0, 0, 0.4);
+                z-index: -1;
+                pointer-events: none;
+            }
 
-    <div class="dashboard-box">
-        <h3>화면 공유 영역</h3>
-        <video id="screenVideo" autoplay playsinline style="width: 100%; max-width: 400px; background: #000;"></video>
-        <button onclick="startScreenShare()">화면 공유 시작</button>
-    </div>
+            .main-container {
+                display: grid;
+                grid-template-columns: 3fr 1fr;
+                gap: 20px;
+                padding: 20px;
+                min-height: 100vh;
+                color: white;
+                position: relative;
+                z-index: 1;
+            }
 
-    <script>
-        let ws = null;
-        let localStream = null;
+            .card-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                gap: 15px;
+                align-content: start;
+            }
 
-        function connectWebSocket() {
-            const nickname = document.getElementById('nicknameInput').value || "누나1";
-            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${location.host}/ws?nickname=${encodeURIComponent(nickname)}`);
+            .timer-card {
+                background: rgba(20, 20, 30, 0.85);
+                border-radius: 12px;
+                padding: 12px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                backdrop-filter: blur(5px);
+                min-height: 330px;
+                position: relative;
+                overflow: hidden;
+            }
 
-            ws.onmessage = function(event) {
+            .card-media-bg {
+                position: absolute;
+                top: 0; left: 0; width: 100%; height: 100%;
+                z-index: 1;
+                opacity: 0.4;
+                pointer-events: none;
+                overflow: hidden;
+            }
+            .card-media-bg img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                position: absolute;
+                top: 0; left: 0;
+            }
+
+            .card-stream-box {
+                width: 100%;
+                height: 160px;
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 6px;
+                overflow: hidden;
+                position: relative;
+                margin-top: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid rgba(255,255,255,0.2);
+                z-index: 2;
+            }
+
+            .card-stream-box video {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                position: relative;
+                z-index: 2;
+                background: black;
+            }
+
+            .card-memo {
+                background: rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-size: 11px;
+                resize: none;
+                height: 50px;
+                margin-top: 6px;
+                position: relative;
+                z-index: 2;
+                width: 100%;
+            }
+
+            .btn-action {
+                background: #0984e3;
+                color: white;
+                border: none;
+                padding: 3px 6px;
+                font-size: 10px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: 0.2s;
+                z-index: 2;
+                position: relative;
+            }
+            .btn-action:hover { background: #74b9ff; }
+
+            .side-panel {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+            }
+            .panel-box {
+                background: rgba(30, 30, 40, 0.85);
+                border-radius: 12px;
+                padding: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                backdrop-filter: blur(5px);
+            }
+            .chat-box {
+                flex-grow: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
+            }
+            .chat-input {
+                display: flex;
+                margin-top: 10px;
+            }
+            .chat-input input {
+                flex-grow: 1;
+                padding: 8px;
+                border-radius: 4px;
+                border: none;
+                background: rgba(255, 255, 255, 0.9);
+                color: black;
+            }
+            .chat-input button {
+                padding: 8px 15px;
+                background: #ff7675;
+                border: none;
+                color: white;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-left: 5px;
+            }
+            
+            .bg-control {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-top: 8px;
+            }
+            .bg-control input[type="text"] {
+                width: 100%;
+                padding: 6px;
+                border-radius: 4px;
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                background: rgba(255, 255, 255, 0.1);
+                color: white;
+                font-size: 12px;
+            }
+            .bg-row {
+                display: flex;
+                gap: 5px;
+                align-items: center;
+            }
+            .bg-row button {
+                padding: 6px 12px;
+                background: #0984e3;
+                border: none;
+                color: white;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+            .slider-container {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 11px;
+                color: #ccc;
+                margin-top: 4px;
+            }
+            .slider-container input[type="range"] {
+                flex-grow: 1;
+            }
+        </style>
+    </head>
+    <body>
+
+        <div class="video-background" id="bgContainer">
+            <div id="player"></div>
+        </div>
+        <div class="overlay"></div>
+
+        <div class="main-container">
+            <div class="card-grid" id="cardGrid"></div>
+
+            <div class="side-panel">
+                <div class="panel-box">
+                    <h3>👑 대시보드</h3>
+                    <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">1명</span> / 최대 10명</p>
+                </div>
+
+                <div class="panel-box" id="masterPanel">
+                    <h3>🖼️ 배경 변경 (유튜브 / 이미지 / GIF)</h3>
+                    <div class="bg-control">
+                        <div class="bg-row">
+                            <input type="text" id="ytInput" placeholder="유튜브 주소 또는 ID 입력" onkeypress="if(event.key==='Enter') changeMasterBackground()">
+                            <button onclick="changeMasterBackground()">적용</button>
+                        </div>
+                        <div style="font-size: 11px; color: #aaa; margin-top:2px;">또는 내 컴퓨터 파일 업로드:</div>
+                        <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
+                        
+                        <div class="slider-container">
+                            <span>배경 크기 조절:</span>
+                            <input type="range" id="bgScaleSlider" min="50" max="250" value="100" oninput="resizeBackground(this.value)">
+                            <span id="scaleValue">100%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-box chat-box">
+                    <h3>💬 실시간 채팅</h3>
+                    <div id="chatHistory" style="height: 180px; overflow-y: auto; margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.4;">
+                        [안내] 행운방 대시보드에 입장했습니다.
+                    </div>
+                    <div class="chat-input">
+                        <input type="text" id="chatInput" placeholder="메시지를 입력하세요..." onkeypress="if(event.key==='Enter') sendChat()">
+                        <button onclick="sendChat()">전송</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://www.youtube.com/iframe_api"></script>
+        <script>
+            let player;
+            let currentVideoId = 'jfKfPfyJRdk';
+
+            function onYouTubeIframeAPIReady() {
+                initYouTubePlayer(currentVideoId);
+            }
+
+            function initYouTubePlayer(videoId) {
+                const bgContainer = document.getElementById('bgContainer');
+                bgContainer.innerHTML = '<div id="player"></div>';
+                player = new YT.Player('player', {
+                    videoId: videoId,
+                    playerVars: {
+                        'autoplay': 1,
+                        'mute': 1,
+                        'controls': 0,
+                        'showinfo': 0,
+                        'autohide': 1,
+                        'modestbranding': 1,
+                        'loop': 1,
+                        'playlist': videoId,
+                        'fs': 0,
+                        'cc_load_policy': 0,
+                        'iv_load_policy': 3,
+                        'rel': 0
+                    },
+                    events: {
+                        'onReady': (event) => { event.target.playVideo(); },
+                        'onStateChange': (event) => {
+                            if (event.data === YT.PlayerState.ENDED) {
+                                player.playVideo();
+                            }
+                        }
+                    }
+                });
+            }
+
+            let isHost = false;
+            let localStream = null;
+            let activeSharingIndex = null;
+            const peerConnections = {};
+
+            const rtcConfig = {
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            };
+
+            const cardData = [
+                { id: 1, user: '누나1', memo: '' },
+                { id: 2, user: '누나2', memo: '' },
+                { id: 3, user: '누나3', memo: '' },
+                { id: 4, user: '누나4', memo: '' },
+                { id: 5, user: '누나5', memo: '' },
+                { id: 6, user: '누나6', memo: '' },
+                { id: 7, user: '누나7', memo: '' },
+                { id: 8, user: '누나8', memo: '' }
+            ];
+
+            function initCards() {
+                const grid = document.getElementById('cardGrid');
+                grid.innerHTML = '';
+                cardData.forEach((card, index) => {
+                    const cardHtml = `
+                        <div class="timer-card" id="card-${index}">
+                            <div class="card-media-bg" id="card-media-${index}">
+                                <img id="img-${index}" src="" style="display:none;" alt="BG">
+                            </div>
+
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; position:relative; z-index:2;">
+                                <input type="text" value="${card.user}" placeholder="아이디" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;" oninput="cardData[${index}].user = this.value">
+                                <input type="file" accept="image/*,image/gif" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
+                                <button class="btn-action" id="btn-share-${index}" onclick="toggleScreenShare(${index})">🖥️ 화면공유</button>
+                            </div>
+                            
+                            <div class="card-stream-box">
+                                <video id="video-${index}" autoplay playsinline muted></video>
+                                <span id="placeholder-${index}" style="position:absolute; font-size:11px; color:#aaa; z-index:1;">화면 미공유 중</span>
+                            </div>
+
+                            <div style="position:relative; z-index:2;">
+                                <textarea class="card-memo" placeholder="메모 입력란..." oninput="cardData[${index}].memo = this.value">${card.memo}</textarea>
+                            </div>
+                        </div>
+                    `;
+                    grid.innerHTML += cardHtml;
+                });
+            }
+
+            function loadCardImage(event, index) {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imgEl = document.getElementById(`img-${index}`);
+                    imgEl.src = e.target.result;
+                    imgEl.style.display = "block";
+                };
+                reader.readAsDataURL(file);
+            }
+
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
+
+            ws.onmessage = async function(event) {
                 const data = JSON.parse(event.data);
-                const chatLog = document.getElementById('chatLog');
-                
-                if (data.type === 'chat') {
-                    chatLog.innerHTML += `<div><b>${data.sender}</b>: ${data.msg}</div>`;
-                    chatLog.scrollTop = chatLog.scrollHeight;
+
+                if (data.type === "chat") {
+                    const history = document.getElementById('chatHistory');
+                    history.innerHTML += `<br>${data.msg}`;
+                    history.scrollTop = history.scrollHeight;
+                } else if (data.type === "count") {
+                    document.getElementById('userCount').innerText = data.count + "명";
+                } else if (data.type === "set_host") {
+                    isHost = true;
+                } else if (data.type === "bg_change") {
+                    const bgContainer = document.getElementById('bgContainer');
+                    const scaleVal = data.scale || 100;
+                    if (data.isImage) {
+                        bgContainer.innerHTML = `<img id="bgMedia" src="${data.mediaSrc}" style="width: ${scaleVal}vw; height: auto;">`;
+                    } else {
+                        currentVideoId = data.videoId;
+                        if (typeof YT !== 'undefined' && YT.Player) {
+                            initYouTubePlayer(currentVideoId);
+                        }
+                    }
+                    document.getElementById('bgScaleSlider').value = scaleVal;
+                    document.getElementById('scaleValue').innerText = scaleVal + "%";
+                } else if (data.type === "bg_resize") {
+                    const scaleVal = data.scale;
+                    const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
+                    if (media) {
+                        media.style.transform = `translate(-50%, -50%) scale(${scaleVal / 100})`;
+                    }
+                    document.getElementById('bgScaleSlider').value = scaleVal;
+                    document.getElementById('scaleValue').innerText = scaleVal + "%";
+                }
+                else if (data.type === "stream_start") {
+                    const idx = data.cardIndex;
+                    document.getElementById(`placeholder-${idx}`).style.display = 'none';
+                    createPeerConnection(idx, false);
+                } else if (data.type === "stream_stop") {
+                    const idx = data.cardIndex;
+                    const videoEl = document.getElementById(`video-${idx}`);
+                    videoEl.srcObject = null;
+                    document.getElementById(`placeholder-${idx}`).style.display = 'block';
+                    if (peerConnections[idx]) {
+                        peerConnections[idx].close();
+                        delete peerConnections[idx];
+                    }
+                } else if (data.type === "offer") {
+                    const idx = data.cardIndex;
+                    let pc = peerConnections[idx];
+                    if (!pc) pc = createPeerConnection(idx, false);
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    ws.send(JSON.stringify({ type: "answer", cardIndex: idx, answer: answer }));
+                } else if (data.type === "answer") {
+                    const idx = data.cardIndex;
+                    const pc = peerConnections[idx];
+                    if (pc) {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    }
+                } else if (data.type === "candidate") {
+                    const idx = data.cardIndex;
+                    const pc = peerConnections[idx];
+                    if (pc && data.candidate) {
+                        await pc.addIceCandidate(new RTCSessionDescription(data.candidate));
+                    }
                 }
             };
 
-            ws.onopen = function() {
-                alert("웹소켓 연결 성공!");
-            };
+            function createPeerConnection(index, isSender) {
+                const pc = new RTCPeerConnection(rtcConfig);
+                peerConnections[index] = pc;
 
-            ws.onclose = function() {
-                alert("웹소켓 연결이 끊어졌습니다.");
-            };
-        }
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({ type: "candidate", cardIndex: index, candidate: event.candidate }));
+                    }
+                };
 
-        function sendMessage() {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                alert("먼저 접속하기 버튼을 눌러주세요!");
-                return;
+                if (!isSender) {
+                    pc.ontrack = (event) => {
+                        const videoEl = document.getElementById(`video-${index}`);
+                        videoEl.srcObject = event.streams[0];
+                        document.getElementById(`placeholder-${index}`).style.display = 'none';
+                    };
+                }
+                return pc;
             }
-            const input = document.getElementById('messageInput');
-            if (!input.value.trim()) return;
 
-            ws.send(JSON.stringify({
-                type: "chat",
-                msg: input.value
-            }));
-            input.value = "";
-        }
+            async function toggleScreenShare(index) {
+                const videoEl = document.getElementById(`video-${index}`);
+                const placeholderEl = document.getElementById(`placeholder-${index}`);
+                const btnEl = document.getElementById(`btn-share-${index}`);
 
-        async function startScreenShare() {
-            try {
-                localStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const videoElement = document.getElementById('screenVideo');
-                videoElement.srcObject = localStream;
-            } catch (err) {
-                console.error("화면 공유 실패:", err);
+                try {
+                    if (activeSharingIndex !== index && localStream) {
+                        alert("이미 다른 카드에서 화면을 공유 중입니다.");
+                        return;
+                    }
+
+                    if (!localStream) {
+                        localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                        videoEl.srcObject = localStream;
+                        placeholderEl.style.display = 'none';
+                        btnEl.innerText = "🛑 공유중단";
+                        activeSharingIndex = index;
+
+                        const pc = createPeerConnection(index, true);
+                        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+
+                        ws.send(JSON.stringify({ type: "stream_start", cardIndex: index }));
+                        ws.send(JSON.stringify({ type: "offer", cardIndex: index, offer: offer }));
+
+                        localStream.getVideoTracks()[0].onended = () => {
+                            stopScreenShare(index);
+                        };
+                    } else {
+                        stopScreenShare(index);
+                    }
+                } catch (err) {
+                    console.log("화면 공유 취소 또는 오류:", err);
+                }
             }
-        }
-    </script>
-</body>
-</html>
-"""
 
-@app.get("/", response_class=HTMLResponse)
-async def get():
-    return HTML_CONTENT
+            function stopScreenShare(index) {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                activeSharingIndex = null;
+                const videoEl = document.getElementById(`video-${index}`);
+                const placeholderEl = document.getElementById(`placeholder-${index}`);
+                const btnEl = document.getElementById(`btn-share-${index}`);
+
+                if (videoEl) videoEl.srcObject = null;
+                if (placeholderEl) placeholderEl.style.display = 'block';
+                if (btnEl) btnEl.innerText = "🖥️ 화면공유";
+
+                if (peerConnections[index]) {
+                    peerConnections[index].close();
+                    delete peerConnections[index];
+                }
+
+                ws.send(JSON.stringify({ type: "stream_stop", cardIndex: index }));
+            }
+
+            initCards();
+
+            function sendChat() {
+                const input = document.getElementById('chatInput');
+                if (!input.value.trim()) return;
+                ws.send(JSON.stringify({ type: "chat", msg: input.value }));
+                input.value = '';
+            }
+
+            function changeMasterBackground() {
+                const inputEl = document.getElementById('ytInput');
+                if (!inputEl) return;
+                const inputVal = inputEl.value.trim();
+                if (!inputVal) return;
+
+                let videoId = inputVal;
+                if (inputVal.includes('youtu.be/')) {
+                    videoId = inputVal.split('youtu.be/')[1].split('?')[0].split('&')[0];
+                } else if (inputVal.includes('watch?v=')) {
+                    videoId = inputVal.split('watch?v=').pop().split('&')[0];
+                } else if (inputVal.includes('embed/')) {
+                    videoId = inputVal.split('embed/')[1].split('?')[0].split('&')[0];
+                }
+
+                videoId = videoId.trim();
+                const scale = document.getElementById('bgScaleSlider').value;
+
+                ws.send(JSON.stringify({ type: "bg_change", isImage: false, videoId: videoId, scale: scale }));
+                inputEl.value = '';
+            }
+
+            function uploadMasterBackground(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const scale = document.getElementById('bgScaleSlider').value;
+                    ws.send(JSON.stringify({ type: "bg_change", isImage: true, mediaSrc: e.target.result, scale: scale }));
+                };
+                reader.readAsDataURL(file);
+            }
+
+            function resizeBackground(scale) {
+                document.getElementById('scaleValue').innerText = scale + "%";
+                const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
+                if (media) {
+                    media.style.transform = `translate(-50%, -50%) scale(${scale / 100})`;
+                }
+                ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, nickname: str = "누나1"):
-    await manager.connect(websocket, nickname)
+async def websocket_endpoint(websocket: WebSocket):
+    if len(manager.active_connections) >= 10:
+        await websocket.accept()
+        await websocket.send_text(json.dumps({"type": "chat", "msg": "[안내] 인원이 가득 찼습니다. (최대 10명)"}))
+        await websocket.close()
+        return
+
+    await manager.connect(websocket)
+    
+    is_host = (len(manager.active_connections) == 1)
+    if is_host:
+        await websocket.send_text(json.dumps({"type": "set_host"}))
+
+    await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
+    
     try:
         while True:
             data = await websocket.receive_text()
@@ -165,24 +629,22 @@ async def websocket_endpoint(websocket: WebSocket, nickname: str = "누나1"):
             p_type = packet.get("type")
 
             if p_type == "chat":
-                current_nickname = manager.active_connections.get(websocket, nickname)
-                msg_text = packet.get("msg")
-                
-                response_data = json.dumps({
-                    "type": "chat",
-                    "sender": current_nickname,
-                    "msg": msg_text
-                })
-                await manager.broadcast(response_data)
-                
-            elif p_type in ["offer", "answer", "candidate"]:
-                await manager.broadcast(data)
+                msg_text = packet.get('msg')
+                # 누나, 서버 부하와 중복 출력을 막기 위해 전체 브로드캐스트로 통합했어
+                await manager.broadcast(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}), sender=websocket)
+                await websocket.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
+            elif p_type in ["bg_change", "bg_resize"]:
+                await manager.broadcast(json.dumps(packet))
+                await websocket.send_text(json.dumps(packet))
+            elif p_type in ["offer", "answer", "candidate", "stream_start", "stream_stop"]:
+                await manager.broadcast(json.dumps(packet), sender=websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-    except Exception:
-        manager.disconnect(websocket)
+        await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
+        await manager.broadcast(json.dumps({"type": "chat", "msg": "[안내] 누군가 나갔습니다."}))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main_new:app", host="0.0.0.0", port=port, reload=True)
+    # 파일 이름에 맞게 수정해야 해 (예: 현재 파일명이 main.py라면 "main:app")
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
