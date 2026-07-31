@@ -29,7 +29,7 @@ manager = ConnectionManager()
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    return """
+    return r"""
     <!DOCTYPE html>
     <html lang="ko">
     <head>
@@ -50,10 +50,26 @@ def read_root():
                 align-items: center;
                 justify-content: center;
             }
-            .video-background img, .video-background iframe {
+            
+            #bgMediaWrapper {
+                width: 100vw;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: transform 0.1s ease;
+            }
+
+            #bgMediaWrapper img {
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
+            }
+
+            #bgMediaWrapper iframe {
+                width: 100vw;
+                height: 100vh;
+                pointer-events: none;
                 border: none;
             }
 
@@ -92,7 +108,7 @@ def read_root():
                 justify-content: space-between;
                 border: 1px solid rgba(255, 255, 255, 0.25);
                 backdrop-filter: blur(5px);
-                min-height: 330px;
+                min-height: 350px;
                 position: relative;
                 overflow: hidden;
             }
@@ -113,17 +129,39 @@ def read_root():
 
             .card-stream-box {
                 width: 100%;
-                height: 160px;
+                height: 170px;
                 background: rgba(0, 0, 0, 0.7);
                 border-radius: 6px;
                 overflow: hidden;
                 position: relative;
                 margin-top: 6px;
                 display: flex;
+                flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 border: 1px solid rgba(255,255,255,0.2);
                 z-index: 2;
+            }
+
+            .card-stream-box video {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                background: #000;
+            }
+
+            .share-btn {
+                padding: 5px 10px;
+                font-size: 11px;
+                background: #ff7675;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-top: 5px;
+            }
+            .share-btn:hover {
+                background: #e17055;
             }
 
             .card-memo {
@@ -212,7 +250,7 @@ def read_root():
     <body>
 
         <div class="video-background" id="bgContainer">
-            <div id="bgMediaWrapper" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;"></div>
+            <div id="bgMediaWrapper"></div>
         </div>
         <div class="overlay"></div>
 
@@ -228,12 +266,12 @@ def read_root():
                 <div class="panel-box">
                     <h3>🖼️ 배경 변경 (이미지 / GIF / 유튜브)</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드 (최대 5MB):</div>
-                        <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
+                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드:</div>
+                        <input type="file" id="bgFileInput" accept="image/*" style="font-size:11px;" onchange="uploadMasterBackground(event)">
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
-                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 주소 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
+                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
                         </div>
                         
@@ -261,6 +299,7 @@ def read_root():
             let currentScale = 100;
             let ws = null;
             const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
+            const localStreams = {};
 
             function logChat(msg) {
                 const history = document.getElementById('chatHistory');
@@ -277,11 +316,14 @@ def read_root():
                             <div class="card-media-bg" id="card-media-${index}"></div>
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; position:relative; z-index:2;">
                                 <input type="text" value="${card.user}" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;">
-                                <input type="file" accept="image/*,image/gif" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
+                                <input type="file" accept="image/*" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
                             </div>
-                            <div class="card-stream-box">
-                                <span style="font-size:11px; color:#aaa;">화면 미공유 중</span>
+                            
+                            <div class="card-stream-box" id="stream-box-${index}">
+                                <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
+                                <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
                             </div>
+
                             <div style="position:relative; z-index:2;">
                                 <textarea class="card-memo" placeholder="메모 입력란..."></textarea>
                             </div>
@@ -290,24 +332,52 @@ def read_root():
                 });
             }
 
+            async function toggleScreenShare(index) {
+                const box = document.getElementById(`stream-box-${index}`);
+
+                if (localStreams[index]) {
+                    // 공유 중단
+                    localStreams[index].getTracks().forEach(track => track.stop());
+                    delete localStreams[index];
+                    box.innerHTML = `
+                        <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
+                        <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
+                    `;
+                } else {
+                    // 공유 시작
+                    try {
+                        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                        localStreams[index] = stream;
+
+                        box.innerHTML = `<video id="video-${index}" autoplay playsinline muted></video>`;
+                        const videoEl = document.getElementById(`video-${index}`);
+                        videoEl.srcObject = stream;
+
+                        // 사용자가 웹 브라우저의 '공유 중지'를 눌렀을 때 처리
+                        stream.getVideoTracks()[0].onended = () => {
+                            delete localStreams[index];
+                            box.innerHTML = `
+                                <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
+                                <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
+                            `;
+                        };
+                    } catch (err) {
+                        console.error("화면 공유 취소 또는 에러:", err);
+                    }
+                }
+            }
+
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const mediaBg = document.getElementById(`card-media-${index}`);
-                    mediaBg.innerHTML = `<img src="${e.target.result}" alt="BG">`;
-                };
-                reader.readAsDataURL(file);
+                const url = URL.createObjectURL(file);
+                const mediaBg = document.getElementById(`card-media-${index}`);
+                mediaBg.innerHTML = `<img src="${url}" alt="BG">`;
             }
 
             function connectWebSocket() {
                 const loc = window.location;
-                let wsProtocol = "ws://";
-                if (loc.protocol === "https:") {
-                    wsProtocol = "wss://";
-                }
-                
+                let wsProtocol = loc.protocol === "https:" ? "wss://" : "ws://";
                 const wsUrl = wsProtocol + loc.host + "/ws";
 
                 try {
@@ -317,7 +387,6 @@ def read_root():
                         const statusEl = document.getElementById('connStatus');
                         statusEl.innerText = "연결됨";
                         statusEl.className = "status-indicator status-online";
-                        logChat("[시스템] 서버에 성공적으로 연결되었습니다.");
                     };
 
                     ws.onmessage = function(event) {
@@ -329,8 +398,7 @@ def read_root():
                                 document.getElementById('userCount').innerText = data.count + "명";
                             } else if (data.type === "bg_change") {
                                 currentScale = data.scale || 100;
-                                const wrapper = document.getElementById('bgMediaWrapper');
-                                wrapper.innerHTML = data.mediaHtml;
+                                document.getElementById('bgMediaWrapper').innerHTML = data.mediaHtml;
                                 document.getElementById('bgScaleSlider').value = currentScale;
                                 document.getElementById('scaleValue').innerText = currentScale + "%";
                                 applyScale();
@@ -341,20 +409,15 @@ def read_root():
                                 applyScale();
                             }
                         } catch(e) {
-                            console.error("수신 데이터 처리 오류:", e);
+                            console.error("데이터 오류:", e);
                         }
                     };
 
                     ws.onclose = function() {
                         const statusEl = document.getElementById('connStatus');
-                        statusEl.innerText = "연결 끊김 (재시도 중)";
+                        statusEl.innerText = "연결 끊김";
                         statusEl.className = "status-indicator status-offline";
                         setTimeout(connectWebSocket, 2000);
-                    };
-
-                    ws.onerror = function(err) {
-                        console.error("웹소켓 에러:", err);
-                        ws.close();
                     };
                 } catch(e) {
                     setTimeout(connectWebSocket, 2000);
@@ -369,58 +432,60 @@ def read_root():
             function sendChat() {
                 const input = document.getElementById('chatInput');
                 if (!input.value.trim()) return;
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    alert("서버 연결 대기 중입니다.");
-                    return;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "chat", msg: input.value }));
+                    input.value = '';
                 }
-                ws.send(JSON.stringify({ type: "chat", msg: input.value }));
-                input.value = '';
             }
 
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
 
-                if (file.size > 5 * 1024 * 1024) {
-                    alert("파일 용량이 너무 큽니다. 5MB 이하의 파일을 선택해 주세요.");
-                    return;
-                }
-
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    alert("서버 연결 상태를 확인해주세요.");
-                    return;
-                }
+                const objectUrl = URL.createObjectURL(file);
+                const mediaHtml = `<img src="${objectUrl}" alt="Background">`;
+                
+                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
+                applyScale();
 
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const scale = document.getElementById('bgScaleSlider').value;
-                    const mediaHtml = `<img src="${e.target.result}" alt="Background">`;
-                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
+                    const networkHtml = `<img src="${e.target.result}" alt="Background">`;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "bg_change", mediaHtml: networkHtml, scale: scale }));
+                    }
                 };
                 reader.readAsDataURL(file);
             }
 
-            function setYoutubeBackground() {
-                const inputVal = document.getElementById('bgYoutubeInput').value.trim();
-                if (!inputVal) return;
-                
-                let videoId = inputVal;
-                if (inputVal.includes('youtube.com') || inputVal.includes('youtu.be')) {
-                    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-                    const match = inputVal.match(regExp);
-                    if (match && match[2].length === 11) {
-                        videoId = match[2];
-                    }
-                }
+            function extractYoutubeId(url) {
+                if (!url) return null;
+                url = url.trim();
+                if (url.length === 11) return url;
+                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                const match = url.match(regExp);
+                return (match && match[2].length === 11) ? match[2] : null;
+            }
 
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    alert("서버 연결 상태를 확인해주세요.");
+            function setYoutubeBackground() {
+                const inputVal = document.getElementById('bgYoutubeInput').value;
+                const videoId = extractYoutubeId(inputVal);
+
+                if (!videoId) {
+                    alert("유튜브 링크가 올바르지 않습니다.");
                     return;
                 }
 
                 const scale = document.getElementById('bgScaleSlider').value;
-                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&enablejsapi=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
-                ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
+                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                
+                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
+                applyScale();
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
+                }
             }
 
             function resizeBackground(scale) {
