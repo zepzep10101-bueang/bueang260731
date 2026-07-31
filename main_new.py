@@ -1,6 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from typing import List
 import json
 import uvicorn
 import os
@@ -9,7 +8,7 @@ app = FastAPI()
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -303,17 +302,22 @@ def read_root():
             }
 
             function connectWebSocket() {
-                const host = window.location.host || '127.0.0.1:8080';
-                const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+                const loc = window.location;
+                let wsProtocol = "ws://";
+                if (loc.protocol === "https:") {
+                    wsProtocol = "wss://";
+                }
                 
+                const wsUrl = wsProtocol + loc.host + "/ws";
+
                 try {
-                    ws = new WebSocket(wsProtocol + host + "/ws");
+                    ws = new WebSocket(wsUrl);
 
                     ws.onopen = function() {
                         const statusEl = document.getElementById('connStatus');
                         statusEl.innerText = "연결됨";
                         statusEl.className = "status-indicator status-online";
-                        logChat("[시스템] 서버와 정상적으로 연결되었습니다.");
+                        logChat("[시스템] 서버에 성공적으로 연결되었습니다.");
                     };
 
                     ws.onmessage = function(event) {
@@ -349,7 +353,7 @@ def read_root():
                     };
 
                     ws.onerror = function(err) {
-                        console.error("웹소켓 에러 발생:", err);
+                        console.error("웹소켓 에러:", err);
                         ws.close();
                     };
                 } catch(e) {
@@ -366,7 +370,7 @@ def read_root():
                 const input = document.getElementById('chatInput');
                 if (!input.value.trim()) return;
                 if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    alert("서버와 연결되어 있지 않습니다. 서버가 켜져있는지 확인해주세요.");
+                    alert("서버 연결 대기 중입니다.");
                     return;
                 }
                 ws.send(JSON.stringify({ type: "chat", msg: input.value }));
@@ -377,9 +381,8 @@ def read_root():
                 const file = event.target.files[0];
                 if (!file) return;
 
-                // 5MB 용량 제한 검사 (대용량 전송으로 인한 웹소켓 튕김 방지)
                 if (file.size > 5 * 1024 * 1024) {
-                    alert("이미지/GIF 용량이 너무 큽니다. 5MB 이하의 파일을 선택해 주세요.");
+                    alert("파일 용량이 너무 큽니다. 5MB 이하의 파일을 선택해 주세요.");
                     return;
                 }
 
