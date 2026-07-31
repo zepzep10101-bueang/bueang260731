@@ -251,13 +251,10 @@ def read_root():
                 </div>
 
                 <div class="panel-box">
-                    <h3>🖼️ 전체 배경 변경 (👑 방장 전용)</h3>
+                    <h3>🖼️ 나만의 전체 배경 설정</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">GIF/이미지 URL 링크 붙여넣기:</div>
-                        <div style="display:flex; gap:4px;">
-                            <input type="text" id="bgUrlInput" placeholder="https://...gif" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
-                            <button onclick="setImageUrlBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
-                        </div>
+                        <div style="font-size: 11px; color: #aaa;">내 컴퓨터 GIF/이미지 파일 선택:</div>
+                        <input type="file" id="bgFileInput" accept="image/*" style="font-size:11px;" onchange="setLocalBackground(event)">
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
@@ -347,6 +344,7 @@ def read_root():
                 }
             }
 
+            // [실시간 8명 공유] 작은 카드 개별 배경 업로드
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -361,6 +359,37 @@ def read_root():
                     }
                 };
                 reader.readAsDataURL(file);
+            }
+
+            // [개인 브라우저 전용] 나만의 전체 배경 설정 (내 컴퓨터 파일)
+            function setLocalBackground(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const objectUrl = URL.createObjectURL(file);
+                document.getElementById('bgMediaWrapper').innerHTML = `<img src="${objectUrl}" alt="Full Background">`;
+            }
+
+            // [개인 브라우저 전용] 나만의 유튜브 전체 배경 설정
+            function extractYoutubeId(url) {
+                if (!url) return null;
+                url = url.trim();
+                if (url.length === 11) return url;
+                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                const match = url.match(regExp);
+                return (match && match[2].length === 11) ? match[2] : null;
+            }
+
+            function setYoutubeBackground() {
+                const inputVal = document.getElementById('bgYoutubeInput').value;
+                const videoId = extractYoutubeId(inputVal);
+
+                if (!videoId) {
+                    alert("유튜브 링크가 올바르지 않습니다.");
+                    return;
+                }
+
+                document.getElementById('bgMediaWrapper').innerHTML = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
             }
 
             function connectWebSocket() {
@@ -384,9 +413,8 @@ def read_root():
                                 logChat(data.msg);
                             } else if (data.type === "count") {
                                 document.getElementById('userCount').innerText = data.count + "명";
-                            } else if (data.type === "bg_change") {
-                                document.getElementById('bgMediaWrapper').innerHTML = data.mediaHtml;
                             } else if (data.type === "card_bg_change") {
+                                // 카드 배경 실시간 전원 동기화
                                 const targetBg = document.getElementById(`card-media-${data.index}`);
                                 if (targetBg) {
                                     targetBg.innerHTML = `<img src="${data.imgUrl}" alt="BG">`;
@@ -417,46 +445,6 @@ def read_root():
                 }
             }
 
-            // GIF/이미지 URL 주소 등록 (배포 서버 튕김 제로)
-            function setImageUrlBackground() {
-                const url = document.getElementById('bgUrlInput').value.trim();
-                if (!url) return;
-
-                const mediaHtml = `<img src="${url}" alt="Full Background">`;
-                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
-
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
-                }
-            }
-
-            function extractYoutubeId(url) {
-                if (!url) return null;
-                url = url.trim();
-                if (url.length === 11) return url;
-                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-                const match = url.match(regExp);
-                return (match && match[2].length === 11) ? match[2] : null;
-            }
-
-            function setYoutubeBackground() {
-                const inputVal = document.getElementById('bgYoutubeInput').value;
-                const videoId = extractYoutubeId(inputVal);
-
-                if (!videoId) {
-                    alert("유튜브 링크가 올바르지 않습니다.");
-                    return;
-                }
-
-                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
-                
-                document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
-
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml }));
-                }
-            }
-
             initCards();
             connectWebSocket();
         </script>
@@ -482,7 +470,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
                     else:
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
-            elif p_type in ["bg_change", "card_bg_change"]:
+            elif p_type == "card_bg_change":
                 await manager.broadcast(json.dumps(packet))
 
     except WebSocketDisconnect:
