@@ -45,17 +45,19 @@ def read_root():
                 z-index: -2;
                 overflow: hidden;
                 pointer-events: none;
+                background: black;
             }
             .video-background iframe, .video-background img, .video-background div {
                 position: absolute;
                 top: 50%; left: 50%;
-                transform: translate(-50%, -50%);
+                transform: translate(-50%, -50%) scale(1);
                 width: 100vw;
                 height: 56.25vw;
                 min-height: 100vh;
                 min-width: 177.77vh;
                 pointer-events: none;
                 border: none;
+                object-fit: cover;
             }
 
             .overlay {
@@ -301,6 +303,7 @@ def read_root():
         <script>
             let player;
             let currentVideoId = 'jfKfPfyJRdk';
+            let currentScale = 100;
 
             function onYouTubeIframeAPIReady() {
                 initYouTubePlayer(currentVideoId);
@@ -326,7 +329,10 @@ def read_root():
                         'rel': 0
                     },
                     events: {
-                        'onReady': (event) => { event.target.playVideo(); },
+                        'onReady': (event) => { 
+                            event.target.playVideo(); 
+                            applyScaleToBackground();
+                        },
                         'onStateChange': (event) => {
                             if (event.data === YT.PlayerState.ENDED) {
                                 player.playVideo();
@@ -399,76 +405,91 @@ def read_root():
             }
 
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
+            let ws;
 
-            ws.onmessage = async function(event) {
-                const data = JSON.parse(event.data);
+            function connectWebSocket() {
+                ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
 
-                if (data.type === "chat") {
-                    const history = document.getElementById('chatHistory');
-                    history.innerHTML += `<br>${data.msg}`;
-                    history.scrollTop = history.scrollHeight;
-                } else if (data.type === "count") {
-                    document.getElementById('userCount').innerText = data.count + "명";
-                } else if (data.type === "set_host") {
-                    isHost = true;
-                } else if (data.type === "bg_change") {
-                    const bgContainer = document.getElementById('bgContainer');
-                    const scaleVal = data.scale || 100;
-                    if (data.isImage) {
-                        bgContainer.innerHTML = `<img id="bgMedia" src="${data.mediaSrc}" style="width: ${scaleVal}vw; height: auto;">`;
-                    } else {
-                        currentVideoId = data.videoId;
-                        if (typeof YT !== 'undefined' && YT.Player) {
-                            initYouTubePlayer(currentVideoId);
+                ws.onmessage = async function(event) {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === "chat") {
+                        const history = document.getElementById('chatHistory');
+                        history.innerHTML += `<br>${data.msg}`;
+                        history.scrollTop = history.scrollHeight;
+                    } else if (data.type === "count") {
+                        document.getElementById('userCount').innerText = data.count + "명";
+                    } else if (data.type === "set_host") {
+                        isHost = true;
+                    } else if (data.type === "bg_change") {
+                        const bgContainer = document.getElementById('bgContainer');
+                        currentScale = data.scale || 100;
+                        if (data.isImage) {
+                            bgContainer.innerHTML = `<img id="bgMedia" src="${data.mediaSrc}">`;
+                        } else {
+                            currentVideoId = data.videoId;
+                            if (typeof YT !== 'undefined' && YT.Player) {
+                                initYouTubePlayer(currentVideoId);
+                            }
+                        }
+                        document.getElementById('bgScaleSlider').value = currentScale;
+                        document.getElementById('scaleValue').innerText = currentScale + "%";
+                        applyScaleToBackground();
+                    } else if (data.type === "bg_resize") {
+                        currentScale = data.scale;
+                        document.getElementById('bgScaleSlider').value = currentScale;
+                        document.getElementById('scaleValue').innerText = currentScale + "%";
+                        applyScaleToBackground();
+                    }
+                    else if (data.type === "stream_start") {
+                        const idx = data.cardIndex;
+                        document.getElementById(`placeholder-${idx}`).style.display = 'none';
+                        createPeerConnection(idx, false);
+                    } else if (data.type === "stream_stop") {
+                        const idx = data.cardIndex;
+                        const videoEl = document.getElementById(`video-${idx}`);
+                        videoEl.srcObject = null;
+                        document.getElementById(`placeholder-${idx}`).style.display = 'block';
+                        if (peerConnections[idx]) {
+                            peerConnections[idx].close();
+                            delete peerConnections[idx];
+                        }
+                    } else if (data.type === "offer") {
+                        const idx = data.cardIndex;
+                        let pc = peerConnections[idx];
+                        if (!pc) pc = createPeerConnection(idx, false);
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        ws.send(JSON.stringify({ type: "answer", cardIndex: idx, answer: answer }));
+                    } else if (data.type === "answer") {
+                        const idx = data.cardIndex;
+                        const pc = peerConnections[idx];
+                        if (pc) {
+                            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        }
+                    } else if (data.type === "candidate") {
+                        const idx = data.cardIndex;
+                        const pc = peerConnections[idx];
+                        if (pc && data.candidate) {
+                            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
                         }
                     }
-                    document.getElementById('bgScaleSlider').value = scaleVal;
-                    document.getElementById('scaleValue').innerText = scaleVal + "%";
-                } else if (data.type === "bg_resize") {
-                    const scaleVal = data.scale;
-                    const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
-                    if (media) {
-                        media.style.transform = `translate(-50%, -50%) scale(${scaleVal / 100})`;
-                    }
-                    document.getElementById('bgScaleSlider').value = scaleVal;
-                    document.getElementById('scaleValue').innerText = scaleVal + "%";
+                };
+
+                ws.onclose = function() {
+                    setTimeout(connectWebSocket, 3000); // 자동 재연결
+                };
+            }
+
+            connectWebSocket();
+
+            function applyScaleToBackground() {
+                const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
+                if (media) {
+                    media.style.transform = `translate(-50%, -50%) scale(${currentScale / 100})`;
                 }
-                else if (data.type === "stream_start") {
-                    const idx = data.cardIndex;
-                    document.getElementById(`placeholder-${idx}`).style.display = 'none';
-                    createPeerConnection(idx, false);
-                } else if (data.type === "stream_stop") {
-                    const idx = data.cardIndex;
-                    const videoEl = document.getElementById(`video-${idx}`);
-                    videoEl.srcObject = null;
-                    document.getElementById(`placeholder-${idx}`).style.display = 'block';
-                    if (peerConnections[idx]) {
-                        peerConnections[idx].close();
-                        delete peerConnections[idx];
-                    }
-                } else if (data.type === "offer") {
-                    const idx = data.cardIndex;
-                    let pc = peerConnections[idx];
-                    if (!pc) pc = createPeerConnection(idx, false);
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    ws.send(JSON.stringify({ type: "answer", cardIndex: idx, answer: answer }));
-                } else if (data.type === "answer") {
-                    const idx = data.cardIndex;
-                    const pc = peerConnections[idx];
-                    if (pc) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    }
-                } else if (data.type === "candidate") {
-                    const idx = data.cardIndex;
-                    const pc = peerConnections[idx];
-                    if (pc && data.candidate) {
-                        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                    }
-                }
-            };
+            }
 
             function createPeerConnection(index, isSender) {
                 const pc = new RTCPeerConnection(rtcConfig);
@@ -593,11 +614,9 @@ def read_root():
             }
 
             function resizeBackground(scale) {
+                currentScale = scale;
                 document.getElementById('scaleValue').innerText = scale + "%";
-                const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
-                if (media) {
-                    media.style.transform = `translate(-50%, -50%) scale(${scale / 100})`;
-                }
+                applyScaleToBackground();
                 ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
             }
         </script>
@@ -648,5 +667,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    # 파일명이 main_new.py이므로 "main_new:app"으로 지정합니다.
     uvicorn.run("main_new:app", host="0.0.0.0", port=port)
