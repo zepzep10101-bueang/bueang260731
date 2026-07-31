@@ -344,7 +344,6 @@ def read_root():
                 }
             }
 
-            // [작은 카드 배경] 경량화 렌더링으로 서버 끊김 방지
             function loadCardImage(event, index) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -368,7 +367,6 @@ def read_root():
                 img.src = blobUrl;
             }
 
-            // [나만의 전체 배경] 내 컴퓨터 GIF/이미지 1초 로딩
             function setLocalBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -377,7 +375,6 @@ def read_root():
                 document.getElementById('bgMediaWrapper').innerHTML = `<img src="${blobUrl}" alt="Full Background">`;
             }
 
-            // [나만의 전체 배경] 유튜브 링크
             function extractYoutubeId(url) {
                 if (!url) return null;
                 url = url.trim();
