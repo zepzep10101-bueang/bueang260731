@@ -46,18 +46,16 @@ def read_root():
                 overflow: hidden;
                 pointer-events: none;
                 background: black;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
-            .video-background iframe, .video-background img, .video-background div {
-                position: absolute;
-                top: 50%; left: 50%;
-                transform: translate(-50%, -50%) scale(1);
-                width: 100vw;
-                height: 56.25vw;
-                min-height: 100vh;
-                min-width: 177.77vh;
-                pointer-events: none;
-                border: none;
+            .video-background img {
+                width: 100%;
+                height: 100%;
                 object-fit: cover;
+                transform: scale(1);
+                transition: transform 0.1s ease;
             }
 
             .overlay {
@@ -215,30 +213,6 @@ def read_root():
                 gap: 8px;
                 margin-top: 8px;
             }
-            .bg-control input[type="text"] {
-                width: 100%;
-                padding: 6px;
-                border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                background: rgba(255, 255, 255, 0.1);
-                color: white;
-                font-size: 12px;
-            }
-            .bg-row {
-                display: flex;
-                gap: 5px;
-                align-items: center;
-            }
-            .bg-row button {
-                padding: 6px 12px;
-                background: #0984e3;
-                border: none;
-                color: white;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 12px;
-                white-space: nowrap;
-            }
             .slider-container {
                 display: flex;
                 align-items: center;
@@ -255,7 +229,7 @@ def read_root():
     <body>
 
         <div class="video-background" id="bgContainer">
-            <div id="player"></div>
+            <img id="bgImgElement" src="" alt="Background" style="display:none;">
         </div>
         <div class="overlay"></div>
 
@@ -269,13 +243,9 @@ def read_root():
                 </div>
 
                 <div class="panel-box" id="masterPanel">
-                    <h3>🖼️ 배경 변경 (유튜브 / 이미지 / GIF)</h3>
+                    <h3>🖼️ 배경 변경 (이미지 / GIF)</h3>
                     <div class="bg-control">
-                        <div class="bg-row">
-                            <input type="text" id="ytInput" placeholder="유튜브 주소 또는 ID 입력" onkeypress="if(event.key==='Enter') changeMasterBackground()">
-                            <button onclick="changeMasterBackground()">적용</button>
-                        </div>
-                        <div style="font-size: 11px; color: #aaa; margin-top:2px;">또는 내 컴퓨터 파일 업로드:</div>
+                        <div style="font-size: 11px; color: #aaa;">배경 이미지/GIF 업로드:</div>
                         <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
                         
                         <div class="slider-container">
@@ -299,50 +269,8 @@ def read_root():
             </div>
         </div>
 
-        <script src="https://www.youtube.com/iframe_api"></script>
         <script>
-            let player;
-            let currentVideoId = 'jfKfPfyJRdk';
             let currentScale = 100;
-
-            function onYouTubeIframeAPIReady() {
-                initYouTubePlayer(currentVideoId);
-            }
-
-            function initYouTubePlayer(videoId) {
-                const bgContainer = document.getElementById('bgContainer');
-                bgContainer.innerHTML = '<div id="player"></div>';
-                player = new YT.Player('player', {
-                    videoId: videoId,
-                    playerVars: {
-                        'autoplay': 1,
-                        'mute': 1,
-                        'controls': 0,
-                        'showinfo': 0,
-                        'autohide': 1,
-                        'modestbranding': 1,
-                        'loop': 1,
-                        'playlist': videoId,
-                        'fs': 0,
-                        'cc_load_policy': 0,
-                        'iv_load_policy': 3,
-                        'rel': 0
-                    },
-                    events: {
-                        'onReady': (event) => { 
-                            event.target.playVideo(); 
-                            applyScaleToBackground();
-                        },
-                        'onStateChange': (event) => {
-                            if (event.data === YT.PlayerState.ENDED) {
-                                player.playVideo();
-                            }
-                        }
-                    }
-                });
-            }
-
-            let isHost = false;
             let localStream = null;
             let activeSharingIndex = null;
             const peerConnections = {};
@@ -419,19 +347,11 @@ def read_root():
                         history.scrollTop = history.scrollHeight;
                     } else if (data.type === "count") {
                         document.getElementById('userCount').innerText = data.count + "명";
-                    } else if (data.type === "set_host") {
-                        isHost = true;
                     } else if (data.type === "bg_change") {
-                        const bgContainer = document.getElementById('bgContainer');
                         currentScale = data.scale || 100;
-                        if (data.isImage) {
-                            bgContainer.innerHTML = `<img id="bgMedia" src="${data.mediaSrc}">`;
-                        } else {
-                            currentVideoId = data.videoId;
-                            if (typeof YT !== 'undefined' && YT.Player) {
-                                initYouTubePlayer(currentVideoId);
-                            }
-                        }
+                        const bgImg = document.getElementById('bgImgElement');
+                        bgImg.src = data.mediaSrc;
+                        bgImg.style.display = "block";
                         document.getElementById('bgScaleSlider').value = currentScale;
                         document.getElementById('scaleValue').innerText = currentScale + "%";
                         applyScaleToBackground();
@@ -485,9 +405,9 @@ def read_root():
             connectWebSocket();
 
             function applyScaleToBackground() {
-                const media = document.getElementById('bgMedia') || document.querySelector('#bgContainer iframe') || document.querySelector('#bgContainer div');
-                if (media) {
-                    media.style.transform = `translate(-50%, -50%) scale(${currentScale / 100})`;
+                const bgImg = document.getElementById('bgImgElement');
+                if (bgImg) {
+                    bgImg.style.transform = `scale(${currentScale / 100})`;
                 }
             }
 
@@ -580,35 +500,13 @@ def read_root():
                 input.value = '';
             }
 
-            function changeMasterBackground() {
-                const inputEl = document.getElementById('ytInput');
-                if (!inputEl) return;
-                const inputVal = inputEl.value.trim();
-                if (!inputVal) return;
-
-                let videoId = inputVal;
-                if (inputVal.includes('youtu.be/')) {
-                    videoId = inputVal.split('youtu.be/')[1].split('?')[0].split('&')[0];
-                } else if (inputVal.includes('watch?v=')) {
-                    videoId = inputVal.split('watch?v=').pop().split('&')[0];
-                } else if (inputVal.includes('embed/')) {
-                    videoId = inputVal.split('embed/')[1].split('?')[0].split('&')[0];
-                }
-
-                videoId = videoId.trim();
-                const scale = document.getElementById('bgScaleSlider').value;
-
-                ws.send(JSON.stringify({ type: "bg_change", isImage: false, videoId: videoId, scale: scale }));
-                inputEl.value = '';
-            }
-
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const scale = document.getElementById('bgScaleSlider').value;
-                    ws.send(JSON.stringify({ type: "bg_change", isImage: true, mediaSrc: e.target.result, scale: scale }));
+                    ws.send(JSON.stringify({ type: "bg_change", mediaSrc: e.target.result, scale: scale }));
                 };
                 reader.readAsDataURL(file);
             }
@@ -634,11 +532,6 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     await manager.connect(websocket)
-    
-    is_host = (len(manager.active_connections) == 1)
-    if is_host:
-        await websocket.send_text(json.dumps({"type": "set_host"}))
-
     await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
     
     try:
