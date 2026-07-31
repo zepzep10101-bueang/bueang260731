@@ -55,6 +55,8 @@ def read_root():
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                transform-origin: center center;
+                transition: transform 0.1s ease-out;
             }
 
             #bgMediaWrapper img {
@@ -158,9 +160,7 @@ def read_root():
                 cursor: pointer;
                 margin-top: 5px;
             }
-            .share-btn:hover {
-                background: #e17055;
-            }
+            .share-btn:hover { background: #e17055; }
 
             .card-memo {
                 background: rgba(0, 0, 0, 0.5);
@@ -177,11 +177,7 @@ def read_root():
                 width: 100%;
             }
 
-            .side-panel {
-                display: flex;
-                flex-direction: column;
-                gap: 15px;
-            }
+            .side-panel { display: flex; flex-direction: column; gap: 15px; }
             .panel-box {
                 background: rgba(30, 30, 40, 0.85);
                 border-radius: 12px;
@@ -189,46 +185,20 @@ def read_root():
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 backdrop-filter: blur(5px);
             }
-            .chat-box {
-                flex-grow: 1;
-                display: flex;
-                flex-direction: column;
-                justify-content: flex-end;
-            }
-            .chat-input {
-                display: flex;
-                margin-top: 10px;
-            }
+            .chat-box { flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; }
+            .chat-input { display: flex; margin-top: 10px; }
             .chat-input input {
-                flex-grow: 1;
-                padding: 8px;
-                border-radius: 4px;
-                border: none;
-                background: rgba(255, 255, 255, 0.9);
-                color: black;
+                flex-grow: 1; padding: 8px; border-radius: 4px; border: none;
+                background: rgba(255, 255, 255, 0.9); color: black;
             }
             .chat-input button {
-                padding: 8px 15px;
-                background: #ff7675;
-                border: none;
-                color: white;
-                border-radius: 4px;
-                cursor: pointer;
-                margin-left: 5px;
+                padding: 8px 15px; background: #ff7675; border: none;
+                color: white; border-radius: 4px; cursor: pointer; margin-left: 5px;
             }
             
-            .bg-control {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                margin-top: 8px;
-            }
+            .bg-control { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
             .status-indicator {
-                font-size: 11px;
-                padding: 2px 6px;
-                border-radius: 3px;
-                display: inline-block;
-                margin-left: 5px;
+                font-size: 11px; padding: 2px 6px; border-radius: 3px; display: inline-block; margin-left: 5px;
             }
             .status-online { background: #00b894; color: white; }
             .status-offline { background: #d63031; color: white; }
@@ -261,13 +231,15 @@ def read_root():
                             <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
                         </div>
+
+                        <div style="font-size: 11px; color: #aaa; margin-top: 8px;">배경 크기 조절:</div>
+                        <input type="range" id="bgZoomRange" min="50" max="200" value="100" style="width:100%; cursor:pointer;" oninput="adjustBgZoom(this.value)">
                     </div>
                 </div>
 
                 <div class="panel-box chat-box">
                     <h3>💬 실시간 채팅</h3>
-                    <div id="chatHistory" style="height: 180px; overflow-y: auto; margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.4;">
-                    </div>
+                    <div id="chatHistory" style="height: 180px; overflow-y: auto; margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.4;"></div>
                     <div class="chat-input">
                         <input type="text" id="chatInput" placeholder="메시지 입력..." onkeypress="if(event.key==='Enter') sendChat()">
                         <button onclick="sendChat()">전송</button>
@@ -314,7 +286,6 @@ def read_root():
 
             async function toggleScreenShare(index) {
                 const box = document.getElementById(`stream-box-${index}`);
-
                 if (localStreams[index]) {
                     localStreams[index].getTracks().forEach(track => track.stop());
                     delete localStreams[index];
@@ -353,8 +324,7 @@ def read_root():
                 img.onload = function() {
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
-                    canvas.width = 300;
-                    canvas.height = 300;
+                    canvas.width = 300; canvas.height = 300;
                     ctx.drawImage(img, 0, 0, 300, 300);
                     const compressedUrl = canvas.toDataURL('image/jpeg', 0.6);
 
@@ -370,9 +340,15 @@ def read_root():
             function setLocalBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
-
                 const blobUrl = URL.createObjectURL(file);
                 document.getElementById('bgMediaWrapper').innerHTML = `<img src="${blobUrl}" alt="Full Background">`;
+            }
+
+            function adjustBgZoom(value) {
+                const wrapper = document.getElementById('bgMediaWrapper');
+                if (wrapper) {
+                    wrapper.style.transform = `scale(${value / 100})`;
+                }
             }
 
             function extractYoutubeId(url) {
@@ -482,4 +458,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main_new:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
