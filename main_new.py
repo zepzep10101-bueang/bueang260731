@@ -465,7 +465,7 @@ def read_root():
                     const idx = data.cardIndex;
                     const pc = peerConnections[idx];
                     if (pc && data.candidate) {
-                        await pc.addIceCandidate(new RTCSessionDescription(data.candidate));
+                        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
                     }
                 }
             };
@@ -496,7 +496,7 @@ def read_root():
                 const btnEl = document.getElementById(`btn-share-${index}`);
 
                 try {
-                    if (activeSharingIndex !== index && localStream) {
+                    if (activeSharingIndex !== null && activeSharingIndex !== index && localStream) {
                         alert("이미 다른 카드에서 화면을 공유 중입니다.");
                         return;
                     }
@@ -630,9 +630,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if p_type == "chat":
                 msg_text = packet.get('msg')
-                # 누나, 서버 부하와 중복 출력을 막기 위해 전체 브로드캐스트로 통합했어
-                await manager.broadcast(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}), sender=websocket)
-                await websocket.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
+                for connection in manager.active_connections:
+                    if connection == websocket:
+                        await connection.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
+                    else:
+                        await connection.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
             elif p_type in ["bg_change", "bg_resize"]:
                 await manager.broadcast(json.dumps(packet))
                 await websocket.send_text(json.dumps(packet))
@@ -646,5 +648,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    # 파일 이름에 맞게 수정해야 해 (예: 현재 파일명이 main.py라면 "main:app")
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    # 파일명이 main_new.py이므로 "main_new:app"으로 지정합니다.
+    uvicorn.run("main_new:app", host="0.0.0.0", port=port)
