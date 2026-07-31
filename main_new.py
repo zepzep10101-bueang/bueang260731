@@ -19,11 +19,12 @@ class ConnectionManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str, sender: WebSocket = None):
-        for connection in self.active_connections:
-            if sender and connection == sender:
-                continue
-            await connection.send_text(message)
+    async def broadcast(self, message: str):
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(message)
+            except Exception:
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -45,7 +46,7 @@ def read_root():
                 z-index: -2;
                 overflow: hidden;
                 pointer-events: none;
-                background: black;
+                background: #050505;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -105,13 +106,10 @@ def read_root():
                 pointer-events: none;
                 overflow: hidden;
             }
-            .card-media-bg img, .card-media-bg iframe {
+            .card-media-bg img {
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
-                position: absolute;
-                top: 0; left: 0;
-                border: none;
             }
 
             .card-stream-box {
@@ -201,6 +199,15 @@ def read_root():
             .slider-container input[type="range"] {
                 flex-grow: 1;
             }
+            .status-indicator {
+                font-size: 11px;
+                padding: 2px 6px;
+                border-radius: 3px;
+                display: inline-block;
+                margin-left: 5px;
+            }
+            .status-online { background: #00b894; color: white; }
+            .status-offline { background: #d63031; color: white; }
         </style>
     </head>
     <body>
@@ -215,19 +222,19 @@ def read_root():
 
             <div class="side-panel">
                 <div class="panel-box">
-                    <h3>👑 대시보드</h3>
-                    <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">1명</span></p>
+                    <h3>👑 대시보드 <span id="connStatus" class="status-indicator status-offline">연결 중...</span></h3>
+                    <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">0명</span></p>
                 </div>
 
                 <div class="panel-box">
                     <h3>🖼️ 배경 변경 (이미지 / GIF / 유튜브)</h3>
                     <div class="bg-control">
-                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드:</div>
+                        <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드 (최대 5MB):</div>
                         <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
                         
                         <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
                         <div style="display:flex; gap:4px;">
-                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 또는 비디오 ID" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
+                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 주소 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
                         </div>
                         
@@ -242,7 +249,6 @@ def read_root():
                 <div class="panel-box chat-box">
                     <h3>💬 실시간 채팅</h3>
                     <div id="chatHistory" style="height: 180px; overflow-y: auto; margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.4;">
-                        [안내] 대시보드에 연결되었습니다.
                     </div>
                     <div class="chat-input">
                         <input type="text" id="chatInput" placeholder="메시지 입력..." onkeypress="if(event.key==='Enter') sendChat()">
@@ -254,8 +260,14 @@ def read_root():
 
         <script>
             let currentScale = 100;
-            let ws;
+            let ws = null;
             const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
+
+            function logChat(msg) {
+                const history = document.getElementById('chatHistory');
+                history.innerHTML += `<div>${msg}</div>`;
+                history.scrollTop = history.scrollHeight;
+            }
 
             function initCards() {
                 const grid = document.getElementById('cardGrid');
@@ -291,35 +303,58 @@ def read_root():
             }
 
             function connectWebSocket() {
+                const host = window.location.host || '127.0.0.1:8080';
                 const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-                ws = new WebSocket(wsProtocol + window.location.host + "/ws");
+                
+                try {
+                    ws = new WebSocket(wsProtocol + host + "/ws");
 
-                ws.onmessage = function(event) {
-                    const data = JSON.parse(event.data);
-                    if (data.type === "chat") {
-                        const history = document.getElementById('chatHistory');
-                        history.innerHTML += `<br>${data.msg}`;
-                        history.scrollTop = history.scrollHeight;
-                    } else if (data.type === "count") {
-                        document.getElementById('userCount').innerText = data.count + "명";
-                    } else if (data.type === "bg_change") {
-                        currentScale = data.scale || 100;
-                        const wrapper = document.getElementById('bgMediaWrapper');
-                        wrapper.innerHTML = data.mediaHtml;
-                        document.getElementById('bgScaleSlider').value = currentScale;
-                        document.getElementById('scaleValue').innerText = currentScale + "%";
-                        applyScale();
-                    } else if (data.type === "bg_resize") {
-                        currentScale = data.scale;
-                        document.getElementById('bgScaleSlider').value = currentScale;
-                        document.getElementById('scaleValue').innerText = currentScale + "%";
-                        applyScale();
-                    }
-                };
+                    ws.onopen = function() {
+                        const statusEl = document.getElementById('connStatus');
+                        statusEl.innerText = "연결됨";
+                        statusEl.className = "status-indicator status-online";
+                        logChat("[시스템] 서버와 정상적으로 연결되었습니다.");
+                    };
 
-                ws.onclose = function() {
+                    ws.onmessage = function(event) {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === "chat") {
+                                logChat(data.msg);
+                            } else if (data.type === "count") {
+                                document.getElementById('userCount').innerText = data.count + "명";
+                            } else if (data.type === "bg_change") {
+                                currentScale = data.scale || 100;
+                                const wrapper = document.getElementById('bgMediaWrapper');
+                                wrapper.innerHTML = data.mediaHtml;
+                                document.getElementById('bgScaleSlider').value = currentScale;
+                                document.getElementById('scaleValue').innerText = currentScale + "%";
+                                applyScale();
+                            } else if (data.type === "bg_resize") {
+                                currentScale = data.scale;
+                                document.getElementById('bgScaleSlider').value = currentScale;
+                                document.getElementById('scaleValue').innerText = currentScale + "%";
+                                applyScale();
+                            }
+                        } catch(e) {
+                            console.error("수신 데이터 처리 오류:", e);
+                        }
+                    };
+
+                    ws.onclose = function() {
+                        const statusEl = document.getElementById('connStatus');
+                        statusEl.innerText = "연결 끊김 (재시도 중)";
+                        statusEl.className = "status-indicator status-offline";
+                        setTimeout(connectWebSocket, 2000);
+                    };
+
+                    ws.onerror = function(err) {
+                        console.error("웹소켓 에러 발생:", err);
+                        ws.close();
+                    };
+                } catch(e) {
                     setTimeout(connectWebSocket, 2000);
-                };
+                }
             }
 
             function applyScale() {
@@ -330,6 +365,10 @@ def read_root():
             function sendChat() {
                 const input = document.getElementById('chatInput');
                 if (!input.value.trim()) return;
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert("서버와 연결되어 있지 않습니다. 서버가 켜져있는지 확인해주세요.");
+                    return;
+                }
                 ws.send(JSON.stringify({ type: "chat", msg: input.value }));
                 input.value = '';
             }
@@ -337,6 +376,18 @@ def read_root():
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
+
+                // 5MB 용량 제한 검사 (대용량 전송으로 인한 웹소켓 튕김 방지)
+                if (file.size > 5 * 1024 * 1024) {
+                    alert("이미지/GIF 용량이 너무 큽니다. 5MB 이하의 파일을 선택해 주세요.");
+                    return;
+                }
+
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert("서버 연결 상태를 확인해주세요.");
+                    return;
+                }
+
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const scale = document.getElementById('bgScaleSlider').value;
@@ -359,8 +410,13 @@ def read_root():
                     }
                 }
 
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert("서버 연결 상태를 확인해주세요.");
+                    return;
+                }
+
                 const scale = document.getElementById('bgScaleSlider').value;
-                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&enablejsapi=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
                 ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
             }
 
@@ -368,7 +424,9 @@ def read_root():
                 currentScale = scale;
                 document.getElementById('scaleValue').innerText = scale + "%";
                 applyScale();
-                ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "bg_resize", scale: scale }));
+                }
             }
 
             initCards();
@@ -398,7 +456,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
             elif p_type in ["bg_change", "bg_resize"]:
                 await manager.broadcast(json.dumps(packet))
-                await websocket.send_text(json.dumps(packet))
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
