@@ -37,23 +37,22 @@ def read_root():
         <title>행운방 대시보드</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
-            body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: #111; }
+            body, html { width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; background: transparent; }
 
+            /* 전체 배경 레이어 위치 및 z-index 완전 교정 */
             .video-background {
                 position: fixed;
-                top: 0; left: 0; width: 100vw; height: 100vh;
-                z-index: -2;
+                top: 0; left: 0; 
+                width: 100vw; height: 100vh;
+                z-index: 0;
                 overflow: hidden;
                 pointer-events: none;
-                background: #050505;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                background: #000;
             }
             
             #bgMediaWrapper {
-                width: 100vw;
-                height: 100vh;
+                width: 100%;
+                height: 100%;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -63,6 +62,7 @@ def read_root():
                 width: 100vw;
                 height: 100vh;
                 object-fit: cover;
+                display: block;
             }
 
             #bgMediaWrapper iframe {
@@ -75,8 +75,8 @@ def read_root():
             .overlay {
                 position: fixed;
                 top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0, 0, 0, 0.4);
-                z-index: -1;
+                background: rgba(0, 0, 0, 0.3);
+                z-index: 1;
                 pointer-events: none;
             }
 
@@ -88,7 +88,7 @@ def read_root():
                 min-height: 100vh;
                 color: white;
                 position: relative;
-                z-index: 1;
+                z-index: 2;
             }
 
             .card-grid {
@@ -251,7 +251,6 @@ def read_root():
                     <p style="margin-top:5px; font-size:14px;">현재 접속 인원: <span id="userCount" style="color:#ff7675; font-weight:bold;">0명</span></p>
                 </div>
 
-                <!-- 방장 전용 전체 배경 설정 (크기 조절 제어 제거, 전체화면 고정) -->
                 <div class="panel-box">
                     <h3>🖼️ 전체 배경 변경 (👑 방장 전용)</h3>
                     <div class="bg-control">
@@ -403,7 +402,7 @@ def read_root():
                 }
             }
 
-            // 방장 전용 GIF / 이미지 전체배경 업로드 (화면 전체 100% 꽉 채움)
+            // GIF 및 이미지 배경 로딩 방식 보완 (즉시 렌더링)
             function uploadMasterBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -411,10 +410,10 @@ def read_root():
                 const objectUrl = URL.createObjectURL(file);
                 const mediaHtml = `<img src="${objectUrl}" alt="Full Background">`;
                 
-                // 내 화면 즉시 꽉 채워 변경
+                // 1. 내 브라우저 화면에 GIF 배경 즉시 레이어로 출력
                 document.getElementById('bgMediaWrapper').innerHTML = mediaHtml;
 
-                // 다른 접속자들에게 보낼 데이터
+                // 2. 파일 데이터를 Base64로 전송하여 타 접속자에게도 공유
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const networkHtml = `<img src="${e.target.result}" alt="Full Background">`;
