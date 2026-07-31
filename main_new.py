@@ -50,11 +50,11 @@ def read_root():
                 align-items: center;
                 justify-content: center;
             }
-            .video-background img {
+            .video-background img, .video-background iframe {
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
-                transform: scale(1);
+                border: none;
             }
 
             .overlay {
@@ -105,12 +105,13 @@ def read_root():
                 pointer-events: none;
                 overflow: hidden;
             }
-            .card-media-bg img {
+            .card-media-bg img, .card-media-bg iframe {
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
                 position: absolute;
                 top: 0; left: 0;
+                border: none;
             }
 
             .card-stream-box {
@@ -205,7 +206,7 @@ def read_root():
     <body>
 
         <div class="video-background" id="bgContainer">
-            <img id="bgImgElement" src="" alt="Background" style="display:none;">
+            <div id="bgMediaWrapper" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;"></div>
         </div>
         <div class="overlay"></div>
 
@@ -219,10 +220,16 @@ def read_root():
                 </div>
 
                 <div class="panel-box">
-                    <h3>🖼️ 배경 변경 (이미지 / GIF)</h3>
+                    <h3>🖼️ 배경 변경 (이미지 / GIF / 유튜브)</h3>
                     <div class="bg-control">
                         <div style="font-size: 11px; color: #aaa;">이미지/GIF 업로드:</div>
                         <input type="file" accept="image/*,image/gif" style="font-size:11px;" onchange="uploadMasterBackground(event)">
+                        
+                        <div style="font-size: 11px; color: #aaa; margin-top: 5px;">유튜브 링크 입력:</div>
+                        <div style="display:flex; gap:4px;">
+                            <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 또는 ID" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
+                            <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
+                        </div>
                         
                         <div class="slider-container">
                             <span>크기:</span>
@@ -248,7 +255,6 @@ def read_root():
         <script>
             let currentScale = 100;
             let ws;
-
             const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
 
             function initCards() {
@@ -257,7 +263,7 @@ def read_root():
                 cardData.forEach((card, index) => {
                     grid.innerHTML += `
                         <div class="timer-card">
-                            <div class="card-media-bg"><img id="img-${index}" src="" style="display:none;" alt="BG"></div>
+                            <div class="card-media-bg" id="card-media-${index}"></div>
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; position:relative; z-index:2;">
                                 <input type="text" value="${card.user}" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;">
                                 <input type="file" accept="image/*,image/gif" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
@@ -278,9 +284,8 @@ def read_root():
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const imgEl = document.getElementById(`img-${index}`);
-                    imgEl.src = e.target.result;
-                    imgEl.style.display = "block";
+                    const mediaBg = document.getElementById(`card-media-${index}`);
+                    mediaBg.innerHTML = `<img src="${e.target.result}" alt="BG">`;
                 };
                 reader.readAsDataURL(file);
             }
@@ -299,9 +304,8 @@ def read_root():
                         document.getElementById('userCount').innerText = data.count + "명";
                     } else if (data.type === "bg_change") {
                         currentScale = data.scale || 100;
-                        const bgImg = document.getElementById('bgImgElement');
-                        bgImg.src = data.mediaSrc;
-                        bgImg.style.display = "block";
+                        const wrapper = document.getElementById('bgMediaWrapper');
+                        wrapper.innerHTML = data.mediaHtml;
                         document.getElementById('bgScaleSlider').value = currentScale;
                         document.getElementById('scaleValue').innerText = currentScale + "%";
                         applyScale();
@@ -319,8 +323,8 @@ def read_root():
             }
 
             function applyScale() {
-                const bgImg = document.getElementById('bgImgElement');
-                if (bgImg) bgImg.style.transform = `scale(${currentScale / 100})`;
+                const wrapper = document.getElementById('bgMediaWrapper');
+                if (wrapper) wrapper.style.transform = `scale(${currentScale / 100})`;
             }
 
             function sendChat() {
@@ -336,9 +340,28 @@ def read_root():
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const scale = document.getElementById('bgScaleSlider').value;
-                    ws.send(JSON.stringify({ type: "bg_change", mediaSrc: e.target.result, scale: scale }));
+                    const mediaHtml = `<img src="${e.target.result}" alt="Background">`;
+                    ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
                 };
                 reader.readAsDataURL(file);
+            }
+
+            function setYoutubeBackground() {
+                const inputVal = document.getElementById('bgYoutubeInput').value.trim();
+                if (!inputVal) return;
+                
+                let videoId = inputVal;
+                if (inputVal.includes('youtube.com') || inputVal.includes('youtu.be')) {
+                    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                    const match = inputVal.match(regExp);
+                    if (match && match[2].length === 11) {
+                        videoId = match[2];
+                    }
+                }
+
+                const scale = document.getElementById('bgScaleSlider').value;
+                const mediaHtml = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                ws.send(JSON.stringify({ type: "bg_change", mediaHtml: mediaHtml, scale: scale }));
             }
 
             function resizeBackground(scale) {
