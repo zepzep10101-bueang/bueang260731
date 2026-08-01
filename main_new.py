@@ -18,12 +18,13 @@ class ConnectionManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: str, exclude: WebSocket = None):
         for connection in list(self.active_connections):
-            try:
-                await connection.send_text(message)
-            except Exception:
-                self.disconnect(connection)
+            if connection != exclude:
+                try:
+                    await connection.send_text(message)
+                except Exception:
+                    self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -55,8 +56,6 @@ def read_root():
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                transform-origin: center center;
-                transition: transform 0.1s ease-out;
             }
 
             #bgMediaWrapper img {
@@ -160,7 +159,6 @@ def read_root():
                 cursor: pointer;
                 margin-top: 5px;
             }
-            .share-btn:hover { background: #e17055; }
 
             .card-memo {
                 background: rgba(0, 0, 0, 0.5);
@@ -231,9 +229,6 @@ def read_root():
                             <input type="text" id="bgYoutubeInput" placeholder="유튜브 URL 붙여넣기" style="flex-grow:1; font-size:11px; padding:4px; background:rgba(255,255,255,0.9); color:black; border:none; border-radius:3px;">
                             <button onclick="setYoutubeBackground()" style="font-size:11px; padding:4px 8px; background:#ff7675; border:none; color:white; border-radius:3px; cursor:pointer;">적용</button>
                         </div>
-
-                        <div style="font-size: 11px; color: #aaa; margin-top: 8px;">배경 크기 조절:</div>
-                        <input type="range" id="bgZoomRange" min="50" max="200" value="100" style="width:100%; cursor:pointer;" oninput="adjustBgZoom(this.value)">
                     </div>
                 </div>
 
@@ -251,7 +246,18 @@ def read_root():
         <script>
             let ws = null;
             const cardData = Array.from({length: 8}, (_, i) => ({ id: i+1, user: `누나${i+1}`, memo: '' }));
-            const localStreams = {};
+            let localStream = null;
+            let mySharingIndex = null;
+            const peerConnections = {}; 
+            
+            const rtcConfig = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun.stunprotocol.org:3478' }
+                ]
+            };
 
             function logChat(msg) {
                 const history = document.getElementById('chatHistory');
@@ -267,7 +273,7 @@ def read_root():
                         <div class="timer-card">
                             <div class="card-media-bg" id="card-media-${index}"></div>
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; position:relative; z-index:2;">
-                                <input type="text" value="${card.user}" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;">
+                                <input type="text" id="username-${index}" value="${card.user}" style="width:75px; padding:2px; font-size:11px; background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; border-radius:3px;" oninput="updateUsername(${index}, this.value)">
                                 <input type="file" accept="image/*" style="width:75px; font-size:9px; padding:1px;" onchange="loadCardImage(event, ${index})">
                             </div>
                             
@@ -277,40 +283,86 @@ def read_root():
                             </div>
 
                             <div style="position:relative; z-index:2;">
-                                <textarea class="card-memo" placeholder="메모 입력란..."></textarea>
+                                <textarea class="card-memo" placeholder="메모 입력란..." oninput="updateMemo(${index}, this.value)">${card.memo}</textarea>
                             </div>
                         </div>
                     `;
                 });
             }
 
+            function updateUsername(index, val) {
+                cardData[index].user = val;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "username_change", index: index, user: val }));
+                }
+            }
+
+            function updateMemo(index, val) {
+                cardData[index].memo = val;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "memo_change", index: index, memo: val }));
+                }
+            }
+
             async function toggleScreenShare(index) {
                 const box = document.getElementById(`stream-box-${index}`);
-                if (localStreams[index]) {
-                    localStreams[index].getTracks().forEach(track => track.stop());
-                    delete localStreams[index];
+                
+                if (mySharingIndex === index) {
+                    stopMyShare();
+                    return;
+                }
+
+                if (mySharingIndex !== null) {
+                    stopMyShare();
+                }
+
+                try {
+                    const stream = await navigator.mediaDevices.getDisplayMedia({ 
+                        video: { cursor: "always", frameRate: 30 }, 
+                        audio: false 
+                    });
+                    localStream = stream;
+                    mySharingIndex = index;
+
+                    box.innerHTML = `<video id="video-${index}" autoplay playsinline muted></video>`;
+                    document.getElementById(`video-${index}`).srcObject = stream;
+
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "start_share", index: index }));
+                    }
+
+                    stream.getVideoTracks()[0].onended = () => {
+                        stopMyShare();
+                    };
+                } catch (err) {
+                    console.error("화면 공유 에러:", err);
+                }
+            }
+
+            function stopMyShare() {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                if (mySharingIndex !== null) {
+                    const idx = mySharingIndex;
+                    mySharingIndex = null;
+
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "stop_share", index: idx }));
+                    }
+
+                    const box = document.getElementById(`stream-box-${idx}`);
                     box.innerHTML = `
                         <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
-                        <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
+                        <button class="share-btn" onclick="toggleScreenShare(${idx})">🖥️ 화면 공유</button>
                     `;
-                } else {
-                    try {
-                        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-                        localStreams[index] = stream;
 
-                        box.innerHTML = `<video id="video-${index}" autoplay playsinline muted></video>`;
-                        const videoEl = document.getElementById(`video-${index}`);
-                        videoEl.srcObject = stream;
-
-                        stream.getVideoTracks()[0].onended = () => {
-                            delete localStreams[index];
-                            box.innerHTML = `
-                                <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
-                                <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
-                            `;
-                        };
-                    } catch (err) {
-                        console.error("화면 공유 에러:", err);
+                    for (let key in peerConnections) {
+                        if (key.startsWith(`${idx}_`)) {
+                            peerConnections[key].close();
+                            delete peerConnections[key];
+                        }
                     }
                 }
             }
@@ -340,15 +392,17 @@ def read_root():
             function setLocalBackground(event) {
                 const file = event.target.files[0];
                 if (!file) return;
-                const blobUrl = URL.createObjectURL(file);
-                document.getElementById('bgMediaWrapper').innerHTML = `<img src="${blobUrl}" alt="Full Background">`;
-            }
-
-            function adjustBgZoom(value) {
-                const wrapper = document.getElementById('bgMediaWrapper');
-                if (wrapper) {
-                    wrapper.style.transform = `scale(${value / 100})`;
-                }
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const dataUrl = e.target.result;
+                    document.getElementById('bgMediaWrapper').innerHTML = `<img src="${dataUrl}" alt="Full Background">`;
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "global_bg_image", dataUrl: dataUrl }));
+                    }
+                };
+                reader.readAsDataURL(file);
             }
 
             function extractYoutubeId(url) {
@@ -370,6 +424,10 @@ def read_root():
                 }
 
                 document.getElementById('bgMediaWrapper').innerHTML = `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "global_bg_youtube", videoId: videoId }));
+                }
             }
 
             function connectWebSocket() {
@@ -386,17 +444,124 @@ def read_root():
                         statusEl.className = "status-indicator status-online";
                     };
 
-                    ws.onmessage = function(event) {
+                    ws.onmessage = async function(event) {
                         try {
                             const data = JSON.parse(event.data);
                             if (data.type === "chat") {
-                                logChat(data.msg);
+                                logChat(`<b>${data.senderName}</b>: ${data.msg}`);
                             } else if (data.type === "count") {
                                 document.getElementById('userCount').innerText = data.count + "명";
                             } else if (data.type === "card_bg_change") {
                                 const targetBg = document.getElementById(`card-media-${data.index}`);
                                 if (targetBg) {
                                     targetBg.innerHTML = `<img src="${data.imgUrl}" alt="BG">`;
+                                }
+                            } else if (data.type === "username_change") {
+                                cardData[data.index].user = data.user;
+                                const inputEl = document.getElementById(`username-${data.index}`);
+                                if (inputEl) {
+                                    inputEl.value = data.user;
+                                }
+                            } else if (data.type === "memo_change") {
+                                cardData[data.index].memo = data.memo;
+                                const textareas = document.querySelectorAll('.card-memo');
+                                if (textareas[data.index]) {
+                                    textareas[data.index].value = data.memo;
+                                }
+                            } else if (data.type === "global_bg_image") {
+                                document.getElementById('bgMediaWrapper').innerHTML = `<img src="${data.dataUrl}" alt="Full Background">`;
+                            } else if (data.type === "global_bg_youtube") {
+                                document.getElementById('bgMediaWrapper').innerHTML = `<iframe src="https://www.youtube.com/embed/${data.videoId}?autoplay=1&mute=1&loop=1&playlist=${data.videoId}&controls=0&showinfo=0&rel=0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                            } 
+                            else if (data.type === "start_share") {
+                                const targetIndex = data.index;
+                                const sharerId = data.sender;
+
+                                if (data.target && data.target !== ws.clientId) {
+                                    return;
+                                }
+
+                                if (sharerId !== ws.clientId && ws && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: "request_offer", index: targetIndex, target: sharerId }));
+                                }
+                            }
+                            else if (data.type === "request_offer" && data.target === ws.clientId) {
+                                const targetIndex = data.index;
+                                const viewerId = data.sender;
+
+                                if (mySharingIndex === targetIndex && localStream) {
+                                    await createOfferForViewer(targetIndex, viewerId);
+                                }
+                            }
+                            else if (data.type === "offer" && data.target === ws.clientId) {
+                                const index = data.index;
+                                const senderId = data.sender;
+                                const pcKey = `${index}_${senderId}`;
+
+                                if (peerConnections[pcKey]) {
+                                    peerConnections[pcKey].close();
+                                }
+
+                                const pc = new RTCPeerConnection(rtcConfig);
+                                peerConnections[pcKey] = pc;
+
+                                pc.ontrack = (e) => {
+                                    const box = document.getElementById(`stream-box-${index}`);
+                                    box.innerHTML = `<video id="remote-video-${index}" autoplay playsinline></video>`;
+                                    document.getElementById(`remote-video-${index}`).srcObject = e.streams[0];
+                                };
+
+                                pc.onicecandidate = (e) => {
+                                    if (e.candidate && ws && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({ type: "ice", index: index, target: senderId, candidate: e.candidate }));
+                                    }
+                                };
+
+                                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                                const answer = await pc.createAnswer();
+                                await pc.setLocalDescription(answer);
+
+                                if (ws && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: "answer", index: index, target: senderId, sdp: pc.localDescription }));
+                                }
+                            } 
+                            else if (data.type === "answer" && data.target === ws.clientId) {
+                                const pcKey = `${data.index}_${data.sender}`;
+                                const pc = peerConnections[pcKey];
+                                if (pc) {
+                                    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                                }
+                            } 
+                            else if (data.type === "ice" && data.target === ws.clientId) {
+                                const pcKey = `${data.index}_${data.sender}`;
+                                const pc = peerConnections[pcKey];
+                                if (pc && data.candidate) {
+                                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                                }
+                            } 
+                            else if (data.type === "stop_share") {
+                                const index = data.index;
+                                for (let key in peerConnections) {
+                                    if (key.startsWith(`${index}_`)) {
+                                        peerConnections[key].close();
+                                        delete peerConnections[key];
+                                    }
+                                }
+                                const box = document.getElementById(`stream-box-${index}`);
+                                box.innerHTML = `
+                                    <span style="font-size:11px; color:#aaa; margin-bottom: 5px;">화면 미공유 중</span>
+                                    <button class="share-btn" onclick="toggleScreenShare(${index})">🖥️ 화면 공유</button>
+                                `;
+                            }
+                            else if (data.type === "welcome") {
+                                ws.clientId = data.clientId;
+                                if (ws && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: "request_existing_shares" }));
+                                }
+                            }
+                            else if (data.type === "request_existing_shares") {
+                                if (mySharingIndex !== null && ws && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: "start_share", index: mySharingIndex, target: data.sender }));
                                 }
                             }
                         } catch(e) {
@@ -415,11 +580,40 @@ def read_root():
                 }
             }
 
+            async function createOfferForViewer(index, viewerId) {
+                const pcKey = `${index}_${viewerId}`;
+                if (peerConnections[pcKey]) {
+                    peerConnections[pcKey].close();
+                }
+
+                const pc = new RTCPeerConnection(rtcConfig);
+                peerConnections[pcKey] = pc;
+
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                pc.onicecandidate = (e) => {
+                    if (e.candidate && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "ice", index: index, target: viewerId, candidate: e.candidate }));
+                    }
+                };
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "offer", index: index, target: viewerId, sdp: pc.localDescription }));
+                }
+            }
+
             function sendChat() {
                 const input = document.getElementById('chatInput');
-                if (!input.value.trim()) return;
+                const msgText = input.value.trim();
+                if (!msgText) return;
+
+                const myName = document.getElementById('username-0') ? document.getElementById('username-0').value : "누나1";
+
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "chat", msg: input.value }));
+                    ws.send(JSON.stringify({ type: "chat", senderName: myName, msg: msgText }));
                     input.value = '';
                 }
             }
@@ -434,6 +628,9 @@ def read_root():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    client_id = str(id(websocket))
+    
+    await websocket.send_text(json.dumps({"type": "welcome", "clientId": client_id}))
     await manager.broadcast(json.dumps({"type": "count", "count": len(manager.active_connections)}))
     
     try:
@@ -443,14 +640,10 @@ async def websocket_endpoint(websocket: WebSocket):
             p_type = packet.get("type")
 
             if p_type == "chat":
-                msg_text = packet.get('msg')
-                for conn in manager.active_connections:
-                    if conn == websocket:
-                        await conn.send_text(json.dumps({"type": "chat", "msg": f"나: {msg_text}"}))
-                    else:
-                        await conn.send_text(json.dumps({"type": "chat", "msg": f"상대방: {msg_text}"}))
-            elif p_type == "card_bg_change":
                 await manager.broadcast(json.dumps(packet))
+            else:
+                packet["sender"] = client_id
+                await manager.broadcast(json.dumps(packet), exclude=websocket if p_type in ["offer", "answer", "ice"] else None)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
